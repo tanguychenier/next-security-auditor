@@ -21,8 +21,12 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      # THE TOOL AUDITS ITS OWN EXAMPLE PROJECT ON EVERY PUSH. A dry run needs
-      # no API key and no network, and it catches the failure that matters
-      # most: the day the surface mapper stops finding anything at all.
-      - name: audit the example project
-        run: node dist/cli/main.js tests/fixtures/shop --dry-run
+      # THE TOOL MAPS ITS OWN EXAMPLE PROJECT ON EVERY PUSH. A dry run needs no
+      # API key and no network, and it catches the failure that matters most:
+      # the day the surface mapper quietly stops finding anything at all.
+      - name: map the example project
+        run: |
+          node dist/cli/main.js tests/fixtures/shop --dry-run | tee /tmp/surface.txt
+          grep -q '/api/invoices/\[id\]' /tmp/surface.txt
+          grep -q 'server-action' /tmp/surface.txt
+          grep -q 'rules selected' /tmp/surface.txt
