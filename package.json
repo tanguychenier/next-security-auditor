@@ -1,0 +1,63 @@
+{
+  "name": "vulnerability-hunter-next",
+  "version": "0.1.0",
+  "description": "Vulnerability hunter for Next.js — every finding ships with a proof that runs.",
+  "keywords": [
+    "nextjs",
+    "next",
+    "security",
+    "security-audit",
+    "sast",
+    "dast",
+    "static-analysis",
+    "vulnerability-scanner",
+    "appsec",
+    "devsecops",
+    "owasp",
+    "authorization",
+    "idor",
+    "sarif",
+    "github-actions",
+    "ai",
+    "llm",
+    "anthropic",
+    "audit",
+    "penetration-testing"
+  ],
+  "homepage": "https://github.com/tanguychenier/vulnerability-hunter-next#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanguychenier/vulnerability-hunter-next.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tanguychenier/vulnerability-hunter-next/issues"
+  },
+  "author": "Tanguy Chenier",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "vulnerability-hunter": "./dist/cli/main.js",
+    "vulnhunt": "./dist/cli/main.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "lint": "eslint src tests --max-warnings 0",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "^5.6.0",
+    "vitest": "^5.0.0"
+  }
+}
