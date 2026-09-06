@@ -33,3 +33,15 @@ describe('reading the command line', () => {
     expect(parse(['--help'])).toBe('help')
   })
 })
+
+describe('saying which version is running', () => {
+  it('answers the version rather than starting a hunt', () => {
+    // WITHOUT THIS the flag fell through and the tool went looking for an
+    // application to attack, which is not what anybody typing --version wants.
+    expect(parse(['--version'])).toBe('version')
+  })
+
+  it('still asks for help', () => {
+    expect(parse(['--help'])).toBe('help')
+  })
+})

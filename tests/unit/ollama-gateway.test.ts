@@ -72,7 +72,9 @@ describe('asking a model on this machine', () => {
       return { ok: true, status: 200, json: async () => ({ message: { content: '[]' } }), text: async () => '' }
     }) as unknown as typeof fetch
 
-    const answers = await new OllamaGateway({ fetchImpl }).askMany('s', 'u', 100, 4)
+    const answers = await new OllamaGateway({ fetchImpl }).askBatch(
+      Array.from({ length: 4 }, () => ({ system: 's', user: 'u', maxTokens: 100 })),
+    )
 
     expect(answers).toHaveLength(4)
     expect(highest).toBe(1)

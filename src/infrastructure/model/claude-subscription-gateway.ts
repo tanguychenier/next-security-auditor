@@ -67,12 +67,9 @@ export class ClaudeSubscriptionGateway implements ModelGateway {
   }
 
   async ask(system: string, user: string, maxTokens: number): Promise<string> {
-    return (await this.askMany(system, user, maxTokens, 1))[0] ?? ''
+    return (await this.askBatch([{ system, user, maxTokens }]))[0] ?? ''
   }
 
-  async askMany(system: string, user: string, maxTokens: number, times: number): Promise<string[]> {
-    return this.askBatch(Array.from({ length: Math.max(1, times) }, () => ({ system, user, maxTokens })))
-  }
 
   async askBatch(questions: readonly Question[]): Promise<string[]> {
     // THEY GO OUT TOGETHER, BUT NOT ALL AT ONCE. Measured: firing sixteen calls

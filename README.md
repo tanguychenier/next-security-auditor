@@ -167,6 +167,8 @@ something was proven; a suspicion never fails a build.
 | `--local` | off | Ask Ollama on this machine. Nothing leaves it. |
 | `--allow-destructive` | off | Send proofs that change state. Disposable servers only. |
 | `--allow-remote-target` | off | Hunt a target that is not local. Same warning. |
+| `--version` | | Print the installed version. |
+| `--help` | | Print the options and the exit codes. |
 
 Exit codes: `0` nothing proven · `1` at least one proven finding · `2` the hunt
 could not run. An empty surface is `2`, not `0`: a run that read nothing is not a

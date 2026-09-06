@@ -61,9 +61,6 @@ export class OllamaGateway implements ModelGateway {
     return payload.message?.content ?? ''
   }
 
-  async askMany(system: string, user: string, maxTokens: number, times: number): Promise<string[]> {
-    return this.askBatch(Array.from({ length: Math.max(1, times) }, () => ({ system, user, maxTokens })))
-  }
 
   /**
    * One at a time, on purpose.

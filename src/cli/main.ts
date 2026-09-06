@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { NextProjectReader } from '../infrastructure/project/next-project-reader.js'
 import { ModelVulnerabilityFinder } from '../infrastructure/llm/model-vulnerability-finder.js'
 import { AnthropicApiGateway } from '../infrastructure/model/anthropic-api-gateway.js'
@@ -15,7 +17,22 @@ import { renderConsole } from '../infrastructure/report/console.js'
 import { toSarif } from '../infrastructure/report/sarif.js'
 import { estimateAudit } from '../domain/policies/cost-estimate.js'
 
-const VERSION = '0.1.0'
+/**
+ * THE VERSION THE TOOL ANNOUNCES IS THE ONE THAT WAS INSTALLED.
+ *
+ * Written down as a constant it drifts at the first release, and it travels
+ * into every SARIF report a reviewer reads.
+ */
+const VERSION: string = (() => {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'),
+    ) as { version?: string }
+    return manifest.version ?? 'dev'
+  } catch {
+    return 'dev'
+  }
+})()
 
 /** Published prices, per million tokens, for the default model. */
 const PRICING = { inputPerMillion: 3, outputPerMillion: 15 }
@@ -49,6 +66,7 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
   --allow-remote-target   hunt a target that is not local. Same warning.
   --local           ask a model running on this machine through Ollama.
                     No account, no key, and the source never leaves.
+  --version         print the installed version
   --help            this
 
   Runs on the Claude subscription you are already signed in to.
@@ -57,8 +75,9 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
 
 Exit codes: 0 nothing proven, 1 at least one proven finding, 2 the audit could not run.`
 
-export const parse = (argv: readonly string[]): Options | 'help' => {
+export const parse = (argv: readonly string[]): Options | 'help' | 'version' => {
   if (argv.includes('--help') || argv.includes('-h')) return 'help'
+  if (argv.includes('--version')) return 'version'
   const value = (flag: string): string | undefined => {
     const index = argv.indexOf(flag)
     return index === -1 ? undefined : argv[index + 1]
@@ -91,6 +110,11 @@ export const parse = (argv: readonly string[]): Options | 'help' => {
 
 const main = async (): Promise<number> => {
   const options = parse(process.argv.slice(2))
+  if (options === 'version') {
+    process.stdout.write(`${VERSION}\n`)
+    return 0
+  }
+
   if (options === 'help') {
     process.stdout.write(`${USAGE}\n`)
     return 0
