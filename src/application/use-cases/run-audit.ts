@@ -1,6 +1,7 @@
 import type { ProjectReader } from '../ports/project-reader.js'
 import type { ProofRunner } from '../ports/proof-runner.js'
 import { inFlightBounded } from './in-flight-bounded.js'
+import { safeToSend } from '../../domain/policies/safety.js'
 import type { VulnerabilityFinder } from '../ports/vulnerability-finder.js'
 import { Proof, ProofOutcome } from '../../domain/value-objects/proof.js'
 import { reportableFindings, type AuditedFinding } from '../../domain/policies/reportable-findings.js'
@@ -27,6 +28,8 @@ export class RunAudit {
     private readonly prover: ProofRunner,
     /** How many surface entries are hunted at once. Bounded: a plan has rate limits. */
     private readonly concurrency = 4,
+    /** Send proofs whose method or path would change state. */
+    private readonly allowDestructive = false,
   ) {}
 
   async execute(): Promise<AuditReport> {
@@ -46,7 +49,29 @@ export class RunAudit {
       const audited: AuditedFinding[] = []
       for (const finding of suspicions[index] ?? []) {
         const plan = await this.auditor.planProof(finding, entry, source)
-        audited.push({ finding, proof: plan ? await this.prover.run(plan) : unprovable(finding.title) })
+        if (plan === undefined) {
+          audited.push({ finding, proof: unprovable(finding.title) })
+          continue
+        }
+
+        // A PROOF IS A REAL ATTACK ON A REAL APPLICATION. What we did not dare
+        // send is recorded as unproven, and says why, because silence would
+        // read as "the application held".
+        const verdict = safeToSend(plan, { destructive: this.allowDestructive })
+        if (!verdict.allowed) {
+          audited.push({
+            finding,
+            proof: Proof.create({
+              outcome: ProofOutcome.NotRunnable,
+              request: `none: ${plan.method} ${plan.path} was refused`,
+              expectation: plan.expectation,
+              observed: verdict.why,
+            }),
+          })
+          continue
+        }
+
+        audited.push({ finding, proof: await this.prover.run(plan) })
       }
       return audited
     })

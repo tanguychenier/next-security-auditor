@@ -4,8 +4,10 @@ import { NextProjectReader } from '../infrastructure/project/next-project-reader
 import { ModelVulnerabilityFinder } from '../infrastructure/llm/model-vulnerability-finder.js'
 import { AnthropicApiGateway } from '../infrastructure/model/anthropic-api-gateway.js'
 import { ClaudeSubscriptionGateway } from '../infrastructure/model/claude-subscription-gateway.js'
+import { OllamaGateway } from '../infrastructure/model/ollama-gateway.js'
 import { PersistentHunt } from '../application/use-cases/persistent-hunt.js'
 import { readConfigFile } from '../infrastructure/config/config-file.js'
+import { disposableTarget } from '../domain/policies/safety.js'
 import { selectedRules } from '../domain/rules/rule.js'
 import { HttpProofRunner } from '../infrastructure/proof/http-proof-runner.js'
 import { RunAudit } from '../application/use-cases/run-audit.js'
@@ -24,6 +26,12 @@ interface Options {
   readonly format: 'console' | 'sarif' | 'json'
   readonly out?: string
   readonly dryRun: boolean
+  /** Send proofs whose method or path would change state. */
+  readonly allowDestructive: boolean
+  /** Point the hunt at something that is not a local, throwaway server. */
+  readonly allowRemoteTarget: boolean
+  /** Ask a model running on this machine, so nothing leaves it. */
+  readonly local: boolean
   readonly model?: string
 }
 
@@ -36,6 +44,11 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
   --out <file>      write the report to a file instead of stdout
   --model <name>    model to audit with
   --dry-run         map the surface and estimate the cost, call nothing
+  --allow-destructive     send proofs that would change state. Only on a
+                          server whose data you can afford to lose.
+  --allow-remote-target   hunt a target that is not local. Same warning.
+  --local           ask a model running on this machine through Ollama.
+                    No account, no key, and the source never leaves.
   --help            this
 
   Runs on the Claude subscription you are already signed in to.
@@ -54,7 +67,13 @@ export const parse = (argv: readonly string[]): Options | 'help' => {
   if (format !== 'console' && format !== 'sarif' && format !== 'json') {
     throw new Error(`unknown format "${format}": expected console, sarif or json`)
   }
-  const positional = argv.find((argument, index) => !argument.startsWith('-') && !argv[index - 1]?.startsWith('--'))
+  // Flags that take no value, so the word after them is still the path.
+  const FLAGS = ['--dry-run', '--allow-destructive', '--allow-remote-target', '--local']
+  const positional = argv.find(
+    (argument, index) =>
+      !argument.startsWith('-') &&
+      !(argv[index - 1]?.startsWith('--') === true && !FLAGS.includes(argv[index - 1] ?? '')),
+  )
   const out = value('--out')
   const model = value('--model')
   return {
@@ -62,6 +81,9 @@ export const parse = (argv: readonly string[]): Options | 'help' => {
     target: value('--target') ?? 'http://localhost:3000',
     format,
     dryRun: argv.includes('--dry-run'),
+    allowDestructive: argv.includes('--allow-destructive'),
+    allowRemoteTarget: argv.includes('--allow-remote-target'),
+    local: argv.includes('--local'),
     ...(out === undefined ? {} : { out }),
     ...(model === undefined ? {} : { model }),
   }
@@ -122,10 +144,27 @@ const main = async (): Promise<number> => {
   // AN EMPTY KEY IS NOT A MISSING ONE: it means the hunt runs on the
   // subscription the developer is already signed in to. Charging a few euros
   // the first time somebody tries a tool is how a tool never gets tried twice.
+  // THE HUNT SENDS REQUESTS DESIGNED TO SUCCEED. A target that is not a local
+  // throwaway server is refused before anything is sent, because a copied
+  // command or a leftover variable should not attack a live site.
+  if (!options.allowRemoteTarget && !disposableTarget(options.target)) {
+    process.stderr.write(
+      `${options.target} does not look like a local, disposable server.\n` +
+        'The hunt sends requests designed to succeed. Point it at a development\n' +
+        'server with data you can lose, or pass --allow-remote-target to insist.\n',
+    )
+    return 2
+  }
+
   const apiKey = process.env['ANTHROPIC_API_KEY'] ?? ''
   const selection = await readConfigFile(options.path)
-  const gateway =
-    apiKey === ''
+  // NOTHING LEAVES THE MACHINE with --local, and that is a promise a socket
+  // keeps rather than a policy somebody has to read and trust. It wins over a
+  // key left in the environment: a forgotten variable must not quietly send the
+  // code away when somebody asked for local.
+  const gateway = options.local
+    ? new OllamaGateway(options.model === undefined ? {} : { model: options.model })
+    : apiKey === ''
       ? new ClaudeSubscriptionGateway(options.model === undefined ? {} : { model: options.model })
       : new AnthropicApiGateway({ apiKey, ...(options.model === undefined ? {} : { model: options.model }) })
 
@@ -141,6 +180,8 @@ const main = async (): Promise<number> => {
       apiKey === '' ? 2 : 1,
     ),
     new HttpProofRunner(options.target),
+    4,
+    options.allowDestructive,
   ).execute()
 
   const rendered =

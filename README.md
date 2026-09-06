@@ -16,21 +16,22 @@
   <img src="assets/demo.svg" alt="The hunter scans four entry points, reports the one flaw it proved, and says how many suspicions it discarded." width="760">
 </div>
 
-## Three things this does differently
+## What it does
 
-**It costs nothing per run.** The hunt goes through the `claude` CLI you are
-already signed in to. No API key, no per-token bill, no cost to discover
-afterwards. Bring a key only for CI, where nobody is signed in.
+It reads a Next.js application, finds the places a request can reach — route
+handlers, Server Actions, pages, middleware — and asks a model what looks wrong
+there. Then it turns each suspicion into a single HTTP request against your
+running application and sends it. What reproduced is reported with the request
+that proved it. What did not is dropped before you see it.
 
-**It reports what it watched happen.** Every suspicion becomes one HTTP request
-sent to your running application. What reproduced is reported with the request,
-so you can replay it in a terminal. What did not is dropped before you see it —
-not filtered by a confidence threshold you had to tune, just absent.
+There is no confidence score to tune. A finding is in the report because a
+request went out and the application answered the way a vulnerable one answers.
 
-**You choose the rules, and you can add your own.** 43 ship for Next.js. A
-`vulnerability-hunter.config.mjs` at your project root narrows them, mutes one,
-or adds a class of flaw nobody shipped yet. The selection is spent on the prompt,
-not on the report: rules you removed never cost a token.
+It runs on the Claude subscription you are already signed in to, so a hunt costs
+nothing beyond your plan. `--local` asks a model running on your own machine
+through Ollama instead — no account, no key, and the source never leaves. Set
+`ANTHROPIC_API_KEY` to use the paid API, which is what CI needs since nobody is
+signed in there.
 
 ## Quick start
 
@@ -79,8 +80,9 @@ export default {
 }
 ```
 
-New classes of attack are named constantly, so a catalogue you cannot extend is
-a catalogue that ages between releases.
+The selection reaches the prompt, not the report: a rule you removed costs
+nothing. And a rule you add works the same day — the model already knows most
+classes of flaw by name, so instructions are optional.
 
 ## What it hunts that only Next.js has
 
@@ -127,14 +129,13 @@ the only honest signal you have about the model behind the tool.
 
 ## Passing again
 
-The same code does not always give the same answer. Measured on a live run of the
-sibling tool: one pass over a handler with no authorization check reported a
-clean file, and the next reported two flaws.
+A model does not always give the same answer to the same question, so the hunt
+asks each one several times and keeps whatever any pass found. It stops when two
+passes in a row bring nothing new.
 
-So the hunt passes again until two passes in a row bring nothing new. That is
-affordable precisely because there is no bill per token — the missing recall is
-paid in seconds. With `ANTHROPIC_API_KEY` set, it passes once, because then a
-second pass is a second bill.
+This costs seconds rather than money, which is why it is the default on a
+subscription. With `ANTHROPIC_API_KEY` set it asks once, because there a second
+pass is a second line on the bill.
 
 ## In CI
 
@@ -163,10 +164,32 @@ something was proven; a suspicion never fails a build.
 | `--out <file>` | stdout | Write the report to a file. |
 | `--model <name>` | `sonnet` | Model to hunt with. |
 | `--dry-run` | off | Map the surface, price the hunt, call nothing. |
+| `--local` | off | Ask Ollama on this machine. Nothing leaves it. |
+| `--allow-destructive` | off | Send proofs that change state. Disposable servers only. |
+| `--allow-remote-target` | off | Hunt a target that is not local. Same warning. |
 
 Exit codes: `0` nothing proven · `1` at least one proven finding · `2` the hunt
 could not run. An empty surface is `2`, not `0`: a run that read nothing is not a
 clean bill of health.
+
+## Two things it refuses to do on its own
+
+**It will not hunt something that looks like a live site.** The hunt sends
+requests designed to succeed, so a target that is not loopback, a private range
+or a bare container name is refused before anything is sent and before anything
+is paid. `--allow-remote-target` insists.
+
+**It will not send a proof that would change state.** A model asked to
+demonstrate a missing guard on a purge route writes a request to that purge
+route, and on a real application that request is rows gone. So by default only
+reads go out, and nothing whose path announces destruction: purge, delete,
+truncate, drop, wipe, flush, reset. `--allow-destructive` sends them, on a
+server whose data you can afford to lose.
+
+A refused proof is reported as unproven **with its reason**, never as a flaw
+that failed to reproduce. "We did not dare" and "the application held" are
+different facts, and reading the first as the second would hide a real flaw
+behind a reassuring report.
 
 ## What it does not do
 

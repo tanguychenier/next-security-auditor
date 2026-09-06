@@ -11,3 +11,54 @@ export interface ProofPlan {
   /** A string whose presence in the body also means the flaw happened. */
   readonly reproducesOnBodyContaining?: string
 }
+
+/**
+ * Statuses that mean the application did not hand over what was asked for.
+ *
+ * A plan recognising only these has been written backwards: it declares the
+ * flaw demonstrated at the exact moment the application defends itself.
+ */
+const DEFENDED = [401, 403, 404, 405, 407]
+
+/** Wording an application uses when it refuses, never when it leaks. */
+const REFUSALS = [
+  'unauthorized', 'unauthorised', 'forbidden', 'access denied',
+  'permission denied', 'not allowed', 'please log in', 'please login',
+  'authentication required', 'login required', 'must be logged in',
+]
+
+/**
+ * Builds a plan, or refuses one that could never demonstrate anything.
+ *
+ * SEEN FROM A REAL MODEL: `reproducesOnBodyContaining: "Unauthorized access"`.
+ * That says the flaw is demonstrated when the application answers that access
+ * was denied — which is the application working. Measured on a local model,
+ * half the plans came out this way.
+ *
+ * Such a plan runs, fails, and reports a real flaw as not reproduced. Refusing
+ * it costs one finding; running it costs the reader their trust in every empty
+ * report this tool will ever print.
+ */
+export const proofPlan = (shape: ProofPlan): ProofPlan => {
+  const statuses = [...shape.reproducesOnStatus]
+  const marker = shape.reproducesOnBodyContaining
+
+  // A PLAN THAT RECOGNISES NOTHING CANNOT FAIL, so it would report every route
+  // as vulnerable.
+  if (statuses.length === 0 && (marker === undefined || marker.length === 0)) {
+    throw new TypeError('a proof plan says what makes it reproduce: without that it can never fail')
+  }
+
+  const onlyRefusals = statuses.length > 0 && statuses.every((status) => DEFENDED.includes(status))
+  const markerIsRefusal =
+    marker !== undefined && REFUSALS.some((refusal) => marker.toLowerCase().includes(refusal))
+
+  if (onlyRefusals || markerIsRefusal) {
+    throw new TypeError(
+      'this proof plan recognises the application defending itself, not the flaw: ' +
+        'it would run, fail, and report a real flaw as not reproduced',
+    )
+  }
+
+  return { ...shape, method: shape.method.toUpperCase(), reproducesOnStatus: statuses }
+}
