@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { Finding } from '../../src/domain/value-objects/finding.js'
 import { Proof, ProofOutcome } from '../../src/domain/value-objects/proof.js'
 import { Severity } from '../../src/domain/value-objects/severity.js'
+import type { AuditedFinding } from '../../src/domain/policies/reportable-findings.js'
 import { reportableFindings } from '../../src/domain/policies/reportable-findings.js'
 
 const finding = (title: string): Finding =>
@@ -82,5 +83,40 @@ describe('a finding is reportable only once a proof reproduced it', () => {
     ])
 
     expect(kept.map((entry) => entry.finding.severity)).toEqual([Severity.High, Severity.Low])
+  })
+})
+
+describe('the order a reader diffs against yesterday', () => {
+  it('is the same whatever order the findings arrived in', () => {
+    const at = (file: string, line: number, severity: Severity): AuditedFinding => ({
+      finding: Finding.create({
+        title: 'A flaw',
+        kind: 'ssrf',
+        file,
+        line,
+        severity,
+        rationale: 'because',
+      }),
+      proof: Proof.create({
+        outcome: ProofOutcome.Reproduced,
+        request: 'GET /x',
+        expectation: 'refuses',
+        observed: '200',
+      }),
+    })
+
+    const entries = [
+      at('app/b.ts', 10, Severity.High),
+      at('app/a.ts', 20, Severity.High),
+      at('app/a.ts', 5, Severity.High),
+      at('app/a.ts', 5, Severity.Critical),
+    ]
+    const order = (given: AuditedFinding[]): string[] =>
+      reportableFindings(given).map((entry) => `${entry.finding.file}:${entry.finding.line}`)
+
+    const expected = ['app/a.ts:5', 'app/a.ts:5', 'app/a.ts:20', 'app/b.ts:10']
+
+    expect(order(entries)).toEqual(expected)
+    expect(order([...entries].reverse())).toEqual(expected)
   })
 })

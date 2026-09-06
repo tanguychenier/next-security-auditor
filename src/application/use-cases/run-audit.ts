@@ -71,7 +71,7 @@ export class RunAudit {
           continue
         }
 
-        audited.push({ finding, proof: await this.prover.run(plan) })
+        audited.push({ finding, proof: await this.prover.run(plan), plan })
       }
       return audited
     })

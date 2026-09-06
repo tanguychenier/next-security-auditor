@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 import { NextProjectReader } from '../infrastructure/project/next-project-reader.js'
 import { ModelVulnerabilityFinder } from '../infrastructure/llm/model-vulnerability-finder.js'
 import { AnthropicApiGateway } from '../infrastructure/model/anthropic-api-gateway.js'
@@ -9,6 +10,12 @@ import { ClaudeSubscriptionGateway } from '../infrastructure/model/claude-subscr
 import { OllamaGateway } from '../infrastructure/model/ollama-gateway.js'
 import { PersistentHunt } from '../application/use-cases/persistent-hunt.js'
 import { readConfigFile } from '../infrastructure/config/config-file.js'
+import { renderMarkdown } from '../infrastructure/report/markdown.js'
+import { readBaseline, writeBaseline, ensureDirectory } from '../infrastructure/config/baseline-file.js'
+import { replay, stillFailing } from '../application/use-cases/recheck.js'
+import { compare, stopsTheBuild, type AcceptedProof } from '../domain/policies/accepted-findings.js'
+import { identityOf } from '../domain/policies/identity.js'
+import { regressionTestFor, testFileNameFor } from '../infrastructure/report/regression-test.js'
 import { disposableTarget } from '../domain/policies/safety.js'
 import { selectedRules } from '../domain/rules/rule.js'
 import { HttpProofRunner } from '../infrastructure/proof/http-proof-runner.js'
@@ -40,7 +47,7 @@ const PRICING = { inputPerMillion: 3, outputPerMillion: 15 }
 interface Options {
   readonly path: string
   readonly target: string
-  readonly format: 'console' | 'sarif' | 'json'
+  readonly format: 'console' | 'sarif' | 'json' | 'markdown'
   readonly out?: string
   readonly dryRun: boolean
   /** Send proofs whose method or path would change state. */
@@ -49,6 +56,14 @@ interface Options {
   readonly allowRemoteTarget: boolean
   /** Ask a model running on this machine, so nothing leaves it. */
   readonly local: boolean
+  /** Write what this run proved into the baseline, instead of comparing. */
+  readonly accept: boolean
+  /** Replay the accepted proofs instead of hunting. */
+  readonly recheck: boolean
+  /** Where the team keeps what it has already seen. */
+  readonly baseline?: string
+  /** Where to write the regression tests a team commits. */
+  readonly emitTests?: string
   readonly model?: string
 }
 
@@ -57,7 +72,7 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
   vulnerability-hunter-next [path] [options]
 
   --target <url>    running application to prove findings against (default http://localhost:3000)
-  --format <fmt>    console | sarif | json                        (default console)
+  --format <fmt>    console | sarif | json | markdown             (default console)
   --out <file>      write the report to a file instead of stdout
   --model <name>    model to audit with
   --dry-run         map the surface and estimate the cost, call nothing
@@ -66,6 +81,13 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
   --allow-remote-target   hunt a target that is not local. Same warning.
   --local           ask a model running on this machine through Ollama.
                     No account, no key, and the source never leaves.
+  --accept          write what this run proved into the baseline, so later runs
+                    report only what is new
+  --baseline <file> where the baseline lives
+                    (default vulnerability-hunter-baseline.json)
+  --recheck         replay the accepted proofs and say which are closed.
+                    No model is called, so it is free and instant
+  --emit-tests <dir> write a failing test per proven finding, to commit
   --version         print the installed version
   --help            this
 
@@ -83,11 +105,11 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
     return index === -1 ? undefined : argv[index + 1]
   }
   const format = value('--format') ?? 'console'
-  if (format !== 'console' && format !== 'sarif' && format !== 'json') {
-    throw new Error(`unknown format "${format}": expected console, sarif or json`)
+  if (format !== 'console' && format !== 'sarif' && format !== 'json' && format !== 'markdown') {
+    throw new Error(`unknown format "${format}": expected console, sarif, json or markdown`)
   }
   // Flags that take no value, so the word after them is still the path.
-  const FLAGS = ['--dry-run', '--allow-destructive', '--allow-remote-target', '--local']
+  const FLAGS = ['--dry-run', '--allow-destructive', '--allow-remote-target', '--local', '--accept', '--recheck']
   const positional = argv.find(
     (argument, index) =>
       !argument.startsWith('-') &&
@@ -103,13 +125,48 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
     allowDestructive: argv.includes('--allow-destructive'),
     allowRemoteTarget: argv.includes('--allow-remote-target'),
     local: argv.includes('--local'),
+    accept: argv.includes('--accept'),
+    recheck: argv.includes('--recheck'),
+    ...(value('--baseline') === undefined ? {} : { baseline: value('--baseline') as string }),
+    ...(value('--emit-tests') === undefined ? {} : { emitTests: value('--emit-tests') as string }),
     ...(out === undefined ? {} : { out }),
     ...(model === undefined ? {} : { model }),
   }
 }
 
+/** Replays what was accepted, without asking any model. */
+const replayBaseline = async (options: Options): Promise<number> => {
+  const accepted = readBaseline(options.path, options.baseline)
+  if (accepted.length === 0) {
+    process.stderr.write(
+      'Nothing has been accepted yet, so there is nothing to replay.\n' +
+        'Run a hunt first, then --accept what you decide to keep.\n',
+    )
+    return 2
+  }
+
+  const result = await replay(new HttpProofRunner(options.target), accepted)
+
+  for (const entry of result.closed) process.stdout.write(`  closed       ${entry.id}  ${entry.title}\n`)
+  for (const entry of result.stillOpen) process.stdout.write(`  still open   ${entry.id}  ${entry.title}\n`)
+  for (const entry of result.unknown) process.stdout.write(`  no answer    ${entry.id}  ${entry.title}\n`)
+
+  process.stdout.write(
+    `\n${result.closed.length} closed, ${result.stillOpen.length} still open, ` +
+      `${result.unknown.length} could not be replayed.\n`,
+  )
+
+  return stillFailing(result) ? 1 : 0
+}
+
 const main = async (): Promise<number> => {
   const options = parse(process.argv.slice(2))
+  if (options !== 'help' && options !== 'version' && options.recheck) {
+    // DID THE FIX WORK? The requests are already written down, so answering
+    // costs nothing: no model, no bill, and the same verdict twice.
+    return replayBaseline(options)
+  }
+
   if (options === 'version') {
     process.stdout.write(`${VERSION}\n`)
     return 0
@@ -208,9 +265,54 @@ const main = async (): Promise<number> => {
     options.allowDestructive,
   ).execute()
 
+  // Identity is computed where the source is at hand, which is here: the report
+  // carries findings, and recognising one next week needs the file it sits in.
+  const identified: AcceptedProof[] = []
+  for (const { finding, plan } of report.proven) {
+    const source = await reader.read(finding.file)
+    identified.push({
+      id: await identityOf(finding, source),
+      rule: finding.kind.id,
+      file: finding.file,
+      title: finding.title,
+      ...(plan === undefined ? {} : { plan }),
+    })
+  }
+
+  if (options.accept) {
+    const path = writeBaseline(options.path, options.baseline, identified)
+    process.stdout.write(`${identified.length} findings accepted in ${path}.\n`)
+  }
+
+  // THE ONE THING THAT OUTLIVES THIS TOOL: a test in their repository runs on
+  // every push forever, and holds the flaw closed even if we are uninstalled.
+  if (options.emitTests !== undefined) {
+    if (ensureDirectory(options.emitTests)) {
+      let written = 0
+      for (const entry of identified) {
+        const source = regressionTestFor(entry, options.target)
+        if (source === undefined) continue
+        writeFileSync(join(options.emitTests, testFileNameFor(entry)), source, 'utf8')
+        written += 1
+      }
+      process.stdout.write(`\n${written} regression tests written to ${options.emitTests}. Commit them.\n`)
+    } else {
+      process.stdout.write(`\n${options.emitTests} could not be created, so no test was written.\n`)
+    }
+  }
+
+  if (options.accept) return 0
+
+  const compared = compare(
+    readBaseline(options.path, options.baseline).map((entry) => entry.id),
+    identified.map((entry) => entry.id),
+  )
+
   const rendered =
     options.format === 'console'
       ? `${renderConsole(report)}\n`
+      : options.format === 'markdown'
+      ? renderMarkdown(report)
       : `${JSON.stringify(
           options.format === 'sarif'
             ? toSarif(report.proven, VERSION)
@@ -243,11 +345,26 @@ const main = async (): Promise<number> => {
   return report.proven.length > 0 ? 1 : 0
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code
-  })
-  .catch((error: unknown) => {
-    process.stderr.write(`${(error as Error).message}\n`)
-    process.exitCode = 2
-  })
+/**
+ * IT RUNS ONLY WHEN SOMEBODY RAN IT.
+ *
+ * Importing this module used to start a hunt: the tests import `parse` from
+ * here, so the suite was quietly auditing whatever vitest happened to pass as
+ * arguments, and hung once the command grew a step that waits. A library that
+ * does something merely because it was imported is a library nobody can embed.
+ */
+const wasRunDirectly = (): boolean => {
+  const entry = process.argv[1]
+  return entry !== undefined && import.meta.url === pathToFileURL(entry).href
+}
+
+if (wasRunDirectly()) {
+  main()
+    .then((code) => {
+      process.exitCode = code
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(`${(error as Error).message}\n`)
+      process.exitCode = 2
+    })
+}
