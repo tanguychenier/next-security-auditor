@@ -59,6 +59,12 @@ let asked = 0
 let workspace = ''
 
 beforeAll(async () => {
+  // A MISSING BUILD IS NOT A PASSING TEST. Without this the run silently drives
+  // a binary that is not there, and every assertion fails for the wrong reason.
+  if (!existsSync(binary)) {
+    throw new Error(`${binary} is not built: run npm run build before npm test`)
+  }
+
   model = createServer(async (request, response) => {
     asked += 1
     const sent = JSON.parse(await read(request)) as { messages: { role: string; content: string }[] }

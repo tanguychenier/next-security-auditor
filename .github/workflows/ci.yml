@@ -19,8 +19,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      # BUILT BEFORE IT IS TESTED: the end-to-end tests drive dist/cli/main.js
+      # the way a user does, so testing first passes on a stale build and fails
+      # on every fresh clone.
       - run: npm run build
+      - run: npm test
       # THE TOOL MAPS ITS OWN EXAMPLE PROJECT ON EVERY PUSH. A dry run needs no
       # API key and no network, and it catches the failure that matters most:
       # the day the surface mapper quietly stops finding anything at all.
