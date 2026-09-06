@@ -9,23 +9,35 @@
  * Instructions are optional on purpose: demanding a paragraph before a team can
  * add a rule is what keeps catalogues a year behind the attacks.
  */
+/** What would count as having seen a flaw happen. */
+export type Evidence =
+  /** One HTTP request against the running application shows it. */
+  | 'request'
+  /** A bounded run of requests shows it, where one shows nothing. */
+  | 'sequence'
+  /** Nothing this tool sends could demonstrate it. */
+  | 'unprovable'
+  /** The evidence is in the file: a literal quoted at its line. */
+  | 'source'
+
 export interface Rule {
   readonly id: string
   readonly instructions?: string
+  readonly evidence: Evidence
 }
 
 /** Two spellings of the same rule are one rule. */
 const normalise = (name: string): string =>
   name.trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, '')
 
-export const rule = (name: string, instructions?: string): Rule => {
+export const rule = (name: string, instructions?: string, evidence: Evidence = 'request'): Rule => {
   const id = normalise(name)
   if (id.length === 0) throw new TypeError('a rule needs a name: an empty one steers nothing')
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
     throw new TypeError(`a rule name is made of words, letters and digits only: "${name}" is not one`)
   }
   const said = instructions?.trim()
-  return said === undefined || said.length === 0 ? { id } : { id, instructions: said }
+  return said === undefined || said.length === 0 ? { id, evidence } : { id, instructions: said, evidence }
 }
 
 /**
@@ -99,9 +111,41 @@ const DEFINITIONS: Readonly<Record<string, string>> = {
   'weak-content-security-policy': 'A CSP absent, or so permissive that it stops nothing.',
 }
 
-export const NEXT_RULES: readonly Rule[] = Object.entries(DEFINITIONS).map(([name, instructions]) =>
-  rule(name, instructions),
+/**
+ * How each rule that is not shown by one request would be seen instead.
+ *
+ * MEASURED ON A LIVE RUN of the sibling tool: missing-rate-limiting was reported
+ * as proven because one POST answered 200, which shows nothing about the
+ * fifty-first. A run of requests shows it; a race condition needs two requests
+ * in the same instant, which this tool does not do, so it stays out.
+ */
+const EVIDENCE: Readonly<Record<string, Evidence>> = {
+  'hardcoded-secret': 'source',
+  'weak-cryptography': 'source',
+  'insecure-random': 'source',
+  'weak-password-hashing': 'source',
+  'secret-in-public-env': 'source',
+  'missing-rate-limiting': 'sequence',
+  'webhook-replay': 'sequence',
+  'race-condition': 'unprovable',
+  'state-machine-bypass': 'unprovable',
+  'insecure-workflow': 'unprovable',
+  'business-logic-flaw': 'unprovable',
+} as Readonly<Record<string, Evidence>>
+
+/** Every rule, including the ones this tool cannot demonstrate. */
+export const ALL_RULES: readonly Rule[] = Object.entries(DEFINITIONS).map(([name, instructions]) =>
+  rule(name, instructions, EVIDENCE[name] ?? 'request'),
 )
+
+/**
+ * What ships as the default hunt.
+ *
+ * WHAT NOTHING CAN SHOW IS LEFT OUT, and stays in the catalogue: the flaw is
+ * real, we simply cannot demonstrate it, and pretending otherwise is the
+ * failure this exists to prevent.
+ */
+export const NEXT_RULES: readonly Rule[] = ALL_RULES.filter((entry) => entry.evidence !== 'unprovable')
 
 export interface RuleSelection {
   /** Hunt these and nothing else. */

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { rule, NEXT_RULES, selectedRules } from '../../src/domain/rules/rule.js'
+import { rule, ALL_RULES, NEXT_RULES, selectedRules } from '../../src/domain/rules/rule.js'
 
 describe('naming a rule', () => {
   it('needs nothing but a name, because the model knows what it is', () => {
@@ -89,5 +89,29 @@ describe('selecting the rules a hunt runs', () => {
   it('lets removing win over keeping', () => {
     const selected = selectedRules({ only: ['ssrf', 'missing-authorization'], without: ['ssrf'] })
     expect(selected.map((entry) => entry.id)).toEqual(['missing-authorization'])
+  })
+})
+
+describe('what would count as having seen a flaw', () => {
+  it('says how each rule can be shown', () => {
+    expect(rule('cache-poisoning').evidence).toBe('request')
+    expect(ALL_RULES.find((entry) => entry.id === 'hardcoded-secret')?.evidence).toBe('source')
+    expect(ALL_RULES.find((entry) => entry.id === 'missing-rate-limiting')?.evidence).toBe('sequence')
+  })
+
+  it('leaves out what nothing this tool sends could demonstrate', () => {
+    // MEASURED ON A LIVE RUN of the sibling tool: one POST answering 200 was
+    // reported as proof of a missing limit, which shows nothing about the
+    // fifty-first. A race needs two requests in the same instant, so it stays out.
+    const shipped = NEXT_RULES.map((entry) => entry.id)
+
+    expect(shipped).not.toContain('race-condition')
+    expect(shipped).not.toContain('state-machine-bypass')
+    expect(shipped).toContain('missing-rate-limiting')
+  })
+
+  it('keeps them in the catalogue rather than pretending they do not exist', () => {
+    expect(ALL_RULES.map((entry) => entry.id)).toContain('race-condition')
+    expect(ALL_RULES.length).toBeGreaterThan(NEXT_RULES.length)
   })
 })

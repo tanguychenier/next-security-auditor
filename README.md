@@ -50,7 +50,7 @@ you have:
 
 ```
 4 attack-surface entries found.
-43 rules selected.
+39 rules selected.
 8 model calls, about 12,110 input tokens.
 Estimated cost: 0.15 EUR. Nothing was sent.
 
@@ -105,9 +105,18 @@ Those three shapes are why a generic scanner misses the flaws that matter here:
 | `unsafe-revalidation` | A revalidate or purge endpoint reachable without a secret. |
 | `image-optimizer-abuse` | An image domain allowlist wide enough to turn the optimizer into an open proxy. |
 
-The full 43 with their instructions are in
-[`src/domain/rules/rule.ts`](src/domain/rules/rule.ts) — one line each, readable
-in a minute.
+**39 ship for Next.js** by default, and the full catalogue with their
+instructions is in [`src/domain/rules/rule.ts`](src/domain/rules/rule.ts) — one
+line each, readable in a minute.
+
+Four more sit in the catalogue and stay out of the default set, because nothing
+this tool sends could demonstrate them: a race condition needs two requests in
+the same instant, and a workflow bypass needs a stateful path it does not walk.
+They are not wrong, they are unprovable here — and adding one is your decision.
+
+Some flaws do need more than one request, and get a bounded run rather than a
+single call: fewer than five would demonstrate nothing, more than a hundred
+would be an outage rather than a proof.
 
 ## What a report looks like
 
