@@ -2,7 +2,7 @@
 
 # Vulnerability Hunter for Next.js
 
-**Runs on the Claude subscription you already pay for. Reports only what it watched happen.**
+**Reports a flaw only once a request has proved it. Nothing it could not demonstrate reaches you.**
 
 [![CI](https://github.com/tanguychenier/vulnerability-hunter-next/actions/workflows/ci.yml/badge.svg)](https://github.com/tanguychenier/vulnerability-hunter-next/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/vulnerability-hunter-next)](https://www.npmjs.com/package/vulnerability-hunter-next)
@@ -27,14 +27,15 @@ that proved it. What did not is dropped before you see it.
 There is no confidence score to tune. A finding is in the report because a
 request went out and the application answered the way a vulnerable one answers.
 
-It runs on the Claude subscription you are already signed in to, so a hunt costs
-nothing beyond your plan. `--local` asks a model running on your own machine
-through Ollama instead — no account, no key, and the source never leaves. Set
-`ANTHROPIC_API_KEY` to use the paid API, which is what CI needs since nobody is
-signed in there; an `sk-` key that is not `sk-ant-` is read as OpenAI, so a team
-already on that vendor changes nothing but the variable. `OPENAI_BASE_URL` and
-`OLLAMA_HOST` point either one somewhere else, which is what a self-hosted
-vLLM or a GPU box on the network needs.
+**Whichever model you already have will do.** `--local` asks one running on your
+own machine through Ollama: no account, no key, no bill, and the source never
+leaves the machine — which is the first question anybody asks before pointing a
+tool at their employer's code. `ANTHROPIC_API_KEY` uses the paid API, which is
+what CI needs since nobody is signed in there; an `sk-` key that is not
+`sk-ant-` is read as OpenAI, so a team already on that vendor changes nothing
+but the variable. With neither, it uses the Claude subscription you are already
+signed in to. `OPENAI_BASE_URL` and `OLLAMA_HOST` point any of them elsewhere,
+which is what a self-hosted vLLM or a GPU box on the network needs.
 
 ## Quick start
 
