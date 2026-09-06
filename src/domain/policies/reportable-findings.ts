@@ -26,8 +26,7 @@ export interface AuditedFinding {
  * change introduced. Severity alone would let two equal findings swap places.
  */
 export const reportableFindings = (audited: readonly AuditedFinding[]): AuditedFinding[] =>
-  audited
-    .filter((entry) => entry.proof.reproduced)
+  onePerHole(audited.filter((entry) => entry.proof.reproduced))
     .toSorted(
       (left, right) =>
         worstFirst(left.finding.severity, right.finding.severity) ||
@@ -35,3 +34,39 @@ export const reportableFindings = (audited: readonly AuditedFinding[]): AuditedF
         left.finding.line - right.finding.line ||
         left.finding.kind.id.localeCompare(right.finding.kind.id),
     )
+
+/**
+ * One line per hole, not one per sentence the model wrote.
+ *
+ * MEASURED ON A REAL RUN: six proven findings, four of which described the same
+ * unguarded route — "no ownership check", "ids can be enumerated", "the IBAN
+ * leaks". A reader sees four holes, fixes the first, and finds three still
+ * there tomorrow.
+ *
+ * SAME RULE, SAME FILE, SAME REQUEST IS ONE HOLE. What separates those four is
+ * the line the model chose to point at, and that line is not a fact about the
+ * application: the request is. Two different rules stay apart, because each one
+ * needs its own fix.
+ *
+ * THE WORST ONE SURVIVES, so collapsing never understates what was found. A
+ * finding with no plan is never collapsed: without a request there is nothing
+ * saying two of them are the same.
+ */
+const onePerHole = (reproduced: readonly AuditedFinding[]): AuditedFinding[] => {
+  const best = new Map<string, AuditedFinding>()
+  const loose: AuditedFinding[] = []
+
+  for (const entry of reproduced) {
+    if (entry.plan === undefined) {
+      loose.push(entry)
+      continue
+    }
+    const hole = [entry.finding.kind.id, entry.finding.file, entry.plan.method, entry.plan.path].join('\u0000')
+    const seen = best.get(hole)
+    if (seen === undefined || worstFirst(entry.finding.severity, seen.finding.severity) < 0) {
+      best.set(hole, entry)
+    }
+  }
+
+  return [...best.values(), ...loose]
+}
