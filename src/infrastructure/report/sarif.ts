@@ -50,7 +50,7 @@ export const toSarif = (audited: readonly AuditedFinding[], version: string): Sa
         },
       },
       results: audited.map(({ finding, proof }) => ({
-        ruleId: finding.kind,
+        ruleId: finding.kind.id,
         level: LEVELS[finding.severity],
         message: {
           // THE PROOF TRAVELS WITH THE FINDING. A reviewer reading this in a pull

@@ -1,23 +1,19 @@
 import { Severity } from './severity.js'
+import { rule, type Rule } from '../rules/rule.js'
 
 /**
- * The classes of flaw this auditor looks for in a Next.js application.
+ * A FINDING NAMES A RULE, NOT A CASE IN A CLOSED UNION.
  *
- * They are named after what the reader has to fix, not after an OWASP code:
- * "missing-authorization" tells a developer where to go, "A01:2021" does not.
+ * New classes of flaw are named constantly and the model already knows most of
+ * them, so a fixed union would silently drop everything outside it and the
+ * report would look clean. What may be reported is the team's decision, made in
+ * their config file, not ours.
  */
-export type FindingKind =
-  | 'missing-authorization'
-  | 'broken-object-level-authorization'
-  | 'server-secret-reaching-the-client'
-  | 'unvalidated-server-action-input'
-  | 'bypassable-middleware'
-  | 'ssrf'
-  | 'information-disclosure'
+export type { Rule }
 
 export interface FindingShape {
   readonly title: string
-  readonly kind: FindingKind
+  readonly kind: Rule | string
   readonly file: string
   readonly line: number
   readonly severity: Severity
@@ -36,7 +32,7 @@ const nonEmpty = (value: string, field: string): string => {
 export class Finding {
   private constructor(
     readonly title: string,
-    readonly kind: FindingKind,
+    readonly kind: Rule,
     readonly file: string,
     readonly line: number,
     readonly severity: Severity,
@@ -49,7 +45,7 @@ export class Finding {
     }
     return new Finding(
       nonEmpty(shape.title, 'title'),
-      shape.kind,
+      typeof shape.kind === 'string' ? rule(shape.kind) : shape.kind,
       nonEmpty(shape.file, 'file'),
       shape.line,
       shape.severity,

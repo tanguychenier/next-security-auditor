@@ -24,8 +24,11 @@ export interface CostEstimate {
  */
 const CHARACTERS_PER_TOKEN = 3.5
 
-/** Instructions and schema sent alongside each chunk, measured on real runs. */
-const PROMPT_OVERHEAD_TOKENS = 1_400
+/** The fixed part of the instructions: the schema, the framing, the rules of evidence. */
+const PROMPT_FRAME_TOKENS = 500
+
+/** One line of catalogue per rule, measured on the shipped set. */
+const TOKENS_PER_RULE = 22
 
 /** A finding plus its proof plan. Generous on purpose. */
 const OUTPUT_TOKENS_PER_PASS = 900
@@ -36,13 +39,17 @@ const OUTPUT_TOKENS_PER_PASS = 900
  * Two passes per surface entry: one to look for flaws, one to turn a suspected
  * flaw into a proof that runs. Both are billed, so both are counted.
  */
-export const estimateAudit = (sources: readonly SurfaceSource[], pricing: Pricing): CostEstimate => {
+export const estimateAudit = (
+  sources: readonly SurfaceSource[],
+  pricing: Pricing,
+  ruleCount: number,
+): CostEstimate => {
   if (sources.length === 0) {
     return { inputTokens: 0, outputTokens: 0, passes: 0, euros: 0 }
   }
   const passes = sources.length * 2
   const inputTokens = sources.reduce(
-    (total, source) => total + Math.ceil(source.characters / CHARACTERS_PER_TOKEN) + PROMPT_OVERHEAD_TOKENS,
+    (total, source) => total + Math.ceil(source.characters / CHARACTERS_PER_TOKEN) + PROMPT_FRAME_TOKENS + ruleCount * TOKENS_PER_RULE,
     0,
   ) * 2
   const outputTokens = passes * OUTPUT_TOKENS_PER_PASS

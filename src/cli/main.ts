@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises'
 import { NextProjectReader } from '../infrastructure/project/next-project-reader.js'
-import { AnthropicVulnerabilityFinder } from '../infrastructure/llm/anthropic-vulnerability-finder.js'
+import { ModelVulnerabilityFinder } from '../infrastructure/llm/model-vulnerability-finder.js'
+import { AnthropicApiGateway } from '../infrastructure/model/anthropic-api-gateway.js'
+import { ClaudeSubscriptionGateway } from '../infrastructure/model/claude-subscription-gateway.js'
+import { PersistentHunt } from '../application/use-cases/persistent-hunt.js'
+import { readConfigFile } from '../infrastructure/config/config-file.js'
+import { selectedRules } from '../domain/rules/rule.js'
 import { HttpProofRunner } from '../infrastructure/proof/http-proof-runner.js'
 import { RunAudit } from '../application/use-cases/run-audit.js'
 import { renderConsole } from '../infrastructure/report/console.js'
@@ -33,7 +38,9 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
   --dry-run         map the surface and estimate the cost, call nothing
   --help            this
 
-  ANTHROPIC_API_KEY must be set unless --dry-run is used.
+  Runs on the Claude subscription you are already signed in to.
+  Set ANTHROPIC_API_KEY to use the paid API instead, which is what a CI
+  runner needs since nobody is signed in there.
 
 Exit codes: 0 nothing proven, 1 at least one proven finding, 2 the audit could not run.`
 
@@ -82,29 +89,51 @@ const main = async (): Promise<number> => {
     const sources = await Promise.all(
       surface.map(async (entry) => ({ entry, characters: (await reader.read(entry.file)).length })),
     )
-    const estimate = estimateAudit(sources, PRICING)
+    const hunted = selectedRules(await readConfigFile(options.path))
+    const estimate = estimateAudit(sources, PRICING, hunted.length)
     process.stdout.write(
       [
         `${surface.length} attack-surface entries found.`,
+        `${hunted.length} rules selected.`,
         `${estimate.passes} model calls, about ${estimate.inputTokens.toLocaleString('en')} input tokens.`,
         `Estimated cost: ${estimate.euros.toFixed(2)} EUR. Nothing was sent.`,
         '',
-        ...surface.map((entry) => `  ${entry.kind.padEnd(14)} ${entry.file}`),
+        // THE URLS ARE WHAT A READER CHECKS THE MAP AGAINST. A list of file
+        // names cannot be compared with what they know their app exposes, so a
+        // missing route would go unnoticed until the hunt was paid for.
+        ...surface.flatMap((entry) => [
+          `  ${entry.kind.padEnd(14)} ${entry.file}`,
+          ...(entry.reachableAs === undefined
+            ? []
+            : [`                 ${(entry.methods ?? []).join('|') || 'ANY'} ${entry.reachableAs}`]),
+          ...(entry.exports === undefined || entry.exports.length === 0
+            ? []
+            : [`                 actions ${entry.exports.join(', ')}`]),
+          ...(entry.matcher === undefined || entry.matcher.length === 0
+            ? []
+            : [`                 guards ${entry.matcher.join(', ')}`]),
+        ]),
         '',
       ].join('\n'),
     )
     return 0
   }
 
-  const apiKey = process.env['ANTHROPIC_API_KEY']
-  if (!apiKey) {
-    process.stderr.write('ANTHROPIC_API_KEY is not set. Use --dry-run to map the surface without it.\n')
-    return 2
-  }
+  // AN EMPTY KEY IS NOT A MISSING ONE: it means the hunt runs on the
+  // subscription the developer is already signed in to. Charging a few euros
+  // the first time somebody tries a tool is how a tool never gets tried twice.
+  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? ''
+  const selection = await readConfigFile(options.path)
+  const gateway =
+    apiKey === ''
+      ? new ClaudeSubscriptionGateway(options.model === undefined ? {} : { model: options.model })
+      : new AnthropicApiGateway({ apiKey, ...(options.model === undefined ? {} : { model: options.model }) })
 
   const report = await new RunAudit(
     reader,
-    new AnthropicVulnerabilityFinder({ apiKey, ...(options.model === undefined ? {} : { model: options.model }) }),
+    // WHOEVER PAYS DECIDES HOW OFTEN WE PASS. On a subscription the missing
+    // recall is paid in seconds; on a metered key a second pass is a second bill.
+    new PersistentHunt(new ModelVulnerabilityFinder(gateway, { rules: selection }), apiKey === '' ? 4 : 1),
     new HttpProofRunner(options.target),
   ).execute()
 
@@ -120,7 +149,7 @@ const main = async (): Promise<number> => {
                 discarded: report.discarded,
                 proven: report.proven.map(({ finding, proof }) => ({
                   title: finding.title,
-                  kind: finding.kind,
+                  kind: finding.kind.id,
                   severity: finding.severity,
                   location: finding.location,
                   rationale: finding.rationale,

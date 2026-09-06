@@ -19,9 +19,19 @@ const entry = (file: string): SurfaceEntry => ({ kind: 'route-handler', file, me
 const PRICING = { inputPerMillion: 3, outputPerMillion: 15 }
 
 describe('estimating what an audit will cost before spending anything', () => {
+  it('charges less once a project narrows the rules it hunts', () => {
+    // THIS IS WHAT SELECTING BEFOREHAND BUYS. A tool that filters its report
+    // after the fact charges the same either way and shows you less.
+    const whole = estimateAudit([{ entry: entry('a.ts'), characters: 40_000 }], PRICING, 42)
+    const narrow = estimateAudit([{ entry: entry('a.ts'), characters: 40_000 }], PRICING, 2)
+
+    expect(narrow.inputTokens).toBeLessThan(whole.inputTokens)
+    expect(narrow.euros).toBeLessThanOrEqual(whole.euros)
+  })
+
   it('grows with the amount of source actually sent', () => {
-    const small = estimateAudit([{ entry: entry('a.ts'), characters: 1_000 }], PRICING)
-    const large = estimateAudit([{ entry: entry('a.ts'), characters: 100_000 }], PRICING)
+    const small = estimateAudit([{ entry: entry('a.ts'), characters: 1_000 }], PRICING, 42)
+    const large = estimateAudit([{ entry: entry('a.ts'), characters: 100_000 }], PRICING, 42)
 
     expect(large.inputTokens).toBeGreaterThan(small.inputTokens)
     expect(large.euros).toBeGreaterThan(small.euros)
@@ -29,20 +39,20 @@ describe('estimating what an audit will cost before spending anything', () => {
 
   it('counts one audit pass and one proof pass per surface entry', () => {
     // THE PROOF PASS IS NOT FREE and hiding it would make the estimate a lie.
-    const one = estimateAudit([{ entry: entry('a.ts'), characters: 4_000 }], PRICING)
+    const one = estimateAudit([{ entry: entry('a.ts'), characters: 4_000 }], PRICING, 42)
 
     expect(one.passes).toBe(2)
   })
 
   it('rounds the price up to the cent, never down', () => {
-    const estimate = estimateAudit([{ entry: entry('a.ts'), characters: 3 }], PRICING)
+    const estimate = estimateAudit([{ entry: entry('a.ts'), characters: 3 }], PRICING, 42)
 
     expect(estimate.euros).toBeGreaterThan(0)
     expect(Number.isInteger(Math.round(estimate.euros * 100))).toBe(true)
   })
 
   it('costs nothing when there is nothing to audit', () => {
-    const estimate = estimateAudit([], PRICING)
+    const estimate = estimateAudit([], PRICING, 42)
 
     expect(estimate).toMatchObject({ euros: 0, inputTokens: 0, passes: 0 })
   })
