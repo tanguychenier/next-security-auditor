@@ -181,9 +181,15 @@ const main = async (): Promise<number> => {
   const surface = await reader.attackSurface()
 
   if (surface.length === 0) {
+    // AND THIS IS THE FIRST THING MOST PEOPLE SEE, because the first command
+    // anybody types is the wrong one. It says what was looked for and what to
+    // try next, rather than only what failed.
     process.stderr.write(
-      `No Next.js attack surface found in ${options.path}.\n` +
-        'Expected an app/ directory with route handlers, Server Actions, or a middleware file.\n',
+      `No Next.js attack surface found in ${options.path}.\n\n` +
+        'It looked for route handlers and Server Actions under app/, pages under\n' +
+        'app/ or pages/, and a middleware file at the root.\n\n' +
+        'If your application lives elsewhere, name it:\n' +
+        '  npx vulnhunt path/to/app --dry-run\n',
     )
     return 2
   }
