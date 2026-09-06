@@ -1,6 +1,6 @@
 {
   "name": "vulnerability-hunter-next",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Hunts vulnerabilities in a Next.js app on your Claude subscription, and reports a finding only once an HTTP request has reproduced it.",
   "keywords": [
     "nextjs",

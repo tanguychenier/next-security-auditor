@@ -13,7 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -178,4 +178,24 @@ describe('the cache, run as a user runs it', () => {
 
     expect(secondRun).toBeLessThan(uncached)
   }, 240_000)
+})
+
+describe('the way npm actually installs it', () => {
+  it('runs when reached through the bin symlink, not only by its real path', async () => {
+    // THIS IS HOW EVERY USER RUNS IT. npm links node_modules/.bin/vulnhunt at
+    // dist/cli/main.js, so argv[1] is the link and import.meta.url is its
+    // target. Comparing the two unresolved made the tool exit 0 in silence:
+    // installed, invoked, and doing nothing at all.
+    const link = join(workspace, 'vulnhunt')
+    symlinkSync(binary, link)
+
+    const result = await new Promise<Run>((resolve) => {
+      execFile(process.execPath, [link, '--version'], (error, stdout, stderr) =>
+        resolve({ code: error === null ? 0 : ((error as { code?: number }).code ?? 1), stdout, stderr }),
+      )
+    })
+
+    expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(result.code).toBe(0)
+  })
 })

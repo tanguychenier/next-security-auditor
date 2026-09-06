@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { NextProjectReader } from '../infrastructure/project/next-project-reader.js'
@@ -462,7 +462,19 @@ const main = async (): Promise<number> => {
  */
 const wasRunDirectly = (): boolean => {
   const entry = process.argv[1]
-  return entry !== undefined && import.meta.url === pathToFileURL(entry).href
+  if (entry === undefined) return false
+  // THROUGH THE SYMLINK IS HOW EVERYBODY RUNS IT. npm links
+  // node_modules/.bin/vulnhunt at this file, so argv[1] is the link while
+  // import.meta.url is its target. Comparing them unresolved made an installed
+  // tool exit 0 in silence — invoked, and doing nothing at all.
+  const resolved = ((): string => {
+    try {
+      return realpathSync(entry)
+    } catch {
+      return entry
+    }
+  })()
+  return import.meta.url === pathToFileURL(resolved).href
 }
 
 if (wasRunDirectly()) {
