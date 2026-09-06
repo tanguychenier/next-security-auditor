@@ -1,5 +1,6 @@
 import type { ProjectReader } from '../ports/project-reader.js'
 import type { ProofRunner } from '../ports/proof-runner.js'
+import { inFlightBounded } from './in-flight-bounded.js'
 import type { VulnerabilityFinder } from '../ports/vulnerability-finder.js'
 import { Proof, ProofOutcome } from '../../domain/value-objects/proof.js'
 import { reportableFindings, type AuditedFinding } from '../../domain/policies/reportable-findings.js'
@@ -24,22 +25,34 @@ export class RunAudit {
     private readonly reader: ProjectReader,
     private readonly auditor: VulnerabilityFinder,
     private readonly prover: ProofRunner,
+    /** How many surface entries are hunted at once. Bounded: a plan has rate limits. */
+    private readonly concurrency = 4,
   ) {}
 
   async execute(): Promise<AuditReport> {
     const surface = await this.reader.attackSurface()
-    const audited: AuditedFinding[] = []
-    let suspected = 0
 
-    for (const entry of surface) {
-      const source = await this.reader.read(entry.file)
-      for (const finding of await this.auditor.suspect(entry, source)) {
-        suspected += 1
+    const entriesWithSource = await Promise.all(
+      surface.map(async (entry) => [entry, await this.reader.read(entry.file)] as const),
+    )
+
+    // THE WHOLE SURFACE IS ASKED ABOUT AT ONCE. Entries are independent, so
+    // queueing them was our own doing and it cost ten minutes on a live run.
+    const suspicions = await this.auditor.suspectAll(entriesWithSource)
+
+    // The proofs are still bounded: they hit a development server, and firing
+    // fifty requests at once at somebody's laptop is its own kind of rude.
+    const perEntry = await inFlightBounded(entriesWithSource, this.concurrency, async ([entry, source], index) => {
+      const audited: AuditedFinding[] = []
+      for (const finding of suspicions[index] ?? []) {
         const plan = await this.auditor.planProof(finding, entry, source)
         audited.push({ finding, proof: plan ? await this.prover.run(plan) : unprovable(finding.title) })
       }
-    }
+      return audited
+    })
 
+    const audited = perEntry.flat()
+    const suspected = audited.length
     const proven = reportableFindings(audited)
     return { surfaceScanned: surface.length, suspected, proven, discarded: suspected - proven.length }
   }

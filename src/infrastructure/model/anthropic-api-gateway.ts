@@ -1,4 +1,4 @@
-import type { ModelGateway } from '../../application/ports/model-gateway.js'
+import type { ModelGateway, Question } from '../../application/ports/model-gateway.js'
 
 export interface ApiOptions {
   readonly apiKey: string
@@ -24,6 +24,29 @@ export class AnthropicApiGateway implements ModelGateway {
     this.model = options.model ?? 'claude-sonnet-4-5-20250929'
     this.baseUrl = options.baseUrl ?? 'https://api.anthropic.com'
     this.fetchImpl = options.fetchImpl ?? fetch
+  }
+
+  /**
+   * One answer at a time.
+   *
+   * Sampling is how recall is bought on a subscription, where an extra call
+   * costs seconds. On a metered key it costs money, so whoever brings one asks
+   * once and the caller passes `times` of 1.
+   */
+  async askMany(system: string, user: string, maxTokens: number, times: number): Promise<string[]> {
+    const answers: string[] = []
+    for (let sample = 0; sample < Math.max(1, times); sample += 1) {
+      answers.push(await this.ask(system, user, maxTokens))
+    }
+    return answers
+  }
+
+  async askBatch(questions: readonly Question[]): Promise<string[]> {
+    const answers: string[] = []
+    for (const question of questions) {
+      answers.push(await this.ask(question.system, question.user, question.maxTokens))
+    }
+    return answers
   }
 
   async ask(system: string, user: string, maxTokens: number): Promise<string> {

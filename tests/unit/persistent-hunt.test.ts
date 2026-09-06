@@ -41,6 +41,12 @@ class ScriptedFinder implements VulnerabilityFinder {
     return [...answer]
   }
 
+  async suspectAll(entriesWithSource: readonly unknown[]): Promise<Finding[][]> {
+    const perEntry: Finding[][] = []
+    for (let index = 0; index < entriesWithSource.length; index += 1) perEntry.push(await this.suspect())
+    return perEntry
+  }
+
   async planProof(): Promise<undefined> {
     return undefined
   }

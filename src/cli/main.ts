@@ -133,7 +133,13 @@ const main = async (): Promise<number> => {
     reader,
     // WHOEVER PAYS DECIDES HOW OFTEN WE PASS. On a subscription the missing
     // recall is paid in seconds; on a metered key a second pass is a second bill.
-    new PersistentHunt(new ModelVulnerabilityFinder(gateway, { rules: selection }), apiKey === '' ? 4 : 1),
+    // SAMPLES GO OUT TOGETHER on a subscription, so four independent answers
+    // cost one round trip instead of four. A metered key asks once, and the
+    // repeated hunt then only confirms that nothing new is coming back.
+    new PersistentHunt(
+      new ModelVulnerabilityFinder(gateway, { rules: selection, samples: apiKey === '' ? 4 : 1 }),
+      apiKey === '' ? 2 : 1,
+    ),
     new HttpProofRunner(options.target),
   ).execute()
 

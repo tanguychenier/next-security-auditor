@@ -19,10 +19,20 @@ import { Severity } from '../../src/domain/value-objects/severity.js'
 import type { VulnerabilityFinder } from '../../src/application/ports/vulnerability-finder.js'
 import type { ProofRunner } from '../../src/application/ports/proof-runner.js'
 import type { ProofPlan } from '../../src/domain/value-objects/proof-plan.js'
+import type { SurfaceEntry } from '../../src/domain/value-objects/surface-entry.js'
 
 const shop = fileURLToPath(new URL('../fixtures/shop', import.meta.url))
 
+/** Every finder answers the batch by answering each entry; only the model batches for real. */
+const oneByOne = (finder: Pick<VulnerabilityFinder, 'suspect'>) =>
+  async (entriesWithSource: readonly (readonly [SurfaceEntry, string])[]): Promise<Finding[][]> => {
+    const perEntry: Finding[][] = []
+    for (const [entry, source] of entriesWithSource) perEntry.push(await finder.suspect(entry, source))
+    return perEntry
+  }
+
 const suspicious: VulnerabilityFinder = {
+  suspectAll: (entries) => oneByOne(suspicious)(entries),
   async suspect(entry) {
     if (entry.kind !== 'route-handler') return []
     return [
@@ -88,7 +98,11 @@ describe('auditing a Next.js project end to end', () => {
   })
 
   it('reports nothing at all when the auditor suspects nothing', async () => {
-    const calm: VulnerabilityFinder = { async suspect() { return [] }, async planProof() { return undefined } }
+    const calm: VulnerabilityFinder = {
+      async suspect() { return [] },
+      async suspectAll(entries) { return entries.map(() => []) },
+      async planProof() { return undefined },
+    }
 
     const report = await new RunAudit(new NextProjectReader(shop), calm, honestProver).execute()
 

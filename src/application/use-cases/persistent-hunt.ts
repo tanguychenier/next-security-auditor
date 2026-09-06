@@ -39,6 +39,31 @@ export class PersistentHunt implements VulnerabilityFinder {
     private readonly quietPassesBeforeStopping = 2,
   ) {}
 
+  async suspectAll(entriesWithSource: readonly (readonly [SurfaceEntry, string])[]): Promise<Finding[][]> {
+    if (entriesWithSource.length === 0) return []
+
+    const found: Finding[][] = entriesWithSource.map(() => [])
+    let quiet = 0
+
+    for (let pass = 0; pass < this.maximumPasses; pass += 1) {
+      let fresh = 0
+      const perEntry = await this.finder.suspectAll(entriesWithSource)
+      perEntry.forEach((findings, index) => {
+        const kept = found[index]
+        if (kept === undefined) return
+        for (const finding of findings) {
+          if (alreadyFound(kept, finding)) continue
+          kept.push(finding)
+          fresh += 1
+        }
+      })
+      quiet = fresh === 0 ? quiet + 1 : 0
+      if (quiet >= this.quietPassesBeforeStopping) break
+    }
+
+    return found
+  }
+
   async suspect(entry: SurfaceEntry, source: string): Promise<Finding[]> {
     const found: Finding[] = []
     let quiet = 0

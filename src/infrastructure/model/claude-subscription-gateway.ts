@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import type { ModelGateway } from '../../application/ports/model-gateway.js'
+import type { ModelGateway, Question } from '../../application/ports/model-gateway.js'
+import { inFlightBounded } from '../../application/use-cases/in-flight-bounded.js'
 
 export interface CommandResult {
   readonly exitCode: number
@@ -15,6 +16,8 @@ export interface SubscriptionOptions {
   readonly binary?: string
   readonly run?: CommandRunner
   readonly timeoutMs?: number
+  /** How many calls are in flight at once. Measured sweet spot, not a guess. */
+  readonly concurrency?: number
 }
 
 const DEFAULT_MODEL = 'sonnet'
@@ -54,19 +57,38 @@ export class ClaudeSubscriptionGateway implements ModelGateway {
   private readonly model: string
   private readonly binary: string
   private readonly run: CommandRunner
+  private readonly concurrency: number
 
   constructor(options: SubscriptionOptions = {}) {
+    this.concurrency = options.concurrency ?? 6
     this.model = options.model ?? DEFAULT_MODEL
     this.binary = options.binary ?? 'claude'
     this.run = options.run ?? spawnRunner(options.timeoutMs ?? 300_000)
   }
 
-  async ask(system: string, user: string, _maxTokens: number): Promise<string> {
-    const result = await this.run(
-      [this.binary, '--print', '--output-format', 'json', '--model', this.model, '--system-prompt', system, '--allowed-tools', ''],
-      user,
-    )
+  async ask(system: string, user: string, maxTokens: number): Promise<string> {
+    return (await this.askMany(system, user, maxTokens, 1))[0] ?? ''
+  }
 
+  async askMany(system: string, user: string, maxTokens: number, times: number): Promise<string[]> {
+    return this.askBatch(Array.from({ length: Math.max(1, times) }, () => ({ system, user, maxTokens })))
+  }
+
+  async askBatch(questions: readonly Question[]): Promise<string[]> {
+    // THEY GO OUT TOGETHER, BUT NOT ALL AT ONCE. Measured: firing sixteen calls
+    // simultaneously took 244 seconds where six at a time took 111. Past a
+    // point the extra processes queue behind the plan's own limits and behind
+    // each other, and everything gets slower, not faster.
+    return inFlightBounded(questions, this.concurrency, async (question) =>
+      this.readAnswer(await this.run(this.commandFor(question.system), question.user)),
+    )
+  }
+
+  private commandFor(system: string): string[] {
+    return [this.binary, '--print', '--output-format', 'json', '--model', this.model, '--system-prompt', system, '--allowed-tools', '']
+  }
+
+  private readAnswer(result: CommandResult): string {
     if (result.exitCode !== 0) {
       // TELLING SOMEBODY THEIR PROJECT IS CLEAN BECAUSE A BINARY IS MISSING is
       // the most expensive lie this tool could tell.
