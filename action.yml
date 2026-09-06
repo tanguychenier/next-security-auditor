@@ -1,0 +1,47 @@
+name: 'Next.js Security Auditor'
+description: 'Audit a Next.js application and fail the build only on findings proven exploitable.'
+author: 'Tanguy Chénier'
+branding:
+  icon: 'shield'
+  color: 'gray-dark'
+
+inputs:
+  path:
+    description: 'Path to the Next.js application.'
+    required: false
+    default: '.'
+  target:
+    description: 'URL of the running application used to prove findings.'
+    required: false
+    default: 'http://localhost:3000'
+  api-key:
+    description: 'Anthropic API key.'
+    required: true
+  model:
+    description: 'Model used for the audit.'
+    required: false
+  sarif-file:
+    description: 'Where to write the SARIF report.'
+    required: false
+    default: 'next-security-auditor.sarif'
+
+outputs:
+  proven:
+    description: 'Number of findings proven exploitable.'
+    value: ${{ steps.audit.outputs.proven }}
+
+runs:
+  using: composite
+  steps:
+    - id: audit
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.api-key }}
+      run: |
+        npx --yes next-security-auditor "${{ inputs.path }}" \
+          --target "${{ inputs.target }}" \
+          ${{ inputs.model && format('--model {0}', inputs.model) || '' }} \
+          --format sarif --out "${{ inputs.sarif-file }}" || status=$?
+        proven=$(python3 -c "import json,sys; print(len(json.load(open('${{ inputs.sarif-file }}'))['runs'][0]['results']))" 2>/dev/null || echo 0)
+        echo "proven=$proven" >> "$GITHUB_OUTPUT"
+        exit "${status:-0}"

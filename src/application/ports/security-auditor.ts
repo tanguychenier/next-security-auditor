@@ -1,0 +1,17 @@
+import type { Finding } from '../../domain/value-objects/finding.js'
+import type { ProofPlan } from '../../domain/value-objects/proof-plan.js'
+import type { SurfaceEntry } from '../../domain/value-objects/surface-entry.js'
+
+/**
+ * The judgement half of the tool, kept behind a port.
+ *
+ * Nothing above this line knows that a language model exists, which is what
+ * lets the whole pipeline be tested offline and lets a provider be swapped
+ * without touching a use case.
+ */
+export interface SecurityAuditor {
+  /** What the auditor believes is wrong. Believing is not proving. */
+  suspect(entry: SurfaceEntry, source: string): Promise<Finding[]>
+  /** Turns a suspicion into a request that would demonstrate it. */
+  planProof(finding: Finding, entry: SurfaceEntry, source: string): Promise<ProofPlan | undefined>
+}

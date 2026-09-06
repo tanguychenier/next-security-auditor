@@ -1,0 +1,31 @@
+{
+  "name": "next-security-auditor",
+  "version": "0.1.0",
+  "description": "AI security auditor for Next.js \u2014 every finding ships with a proof that runs.",
+  "type": "module",
+  "bin": {
+    "next-security-auditor": "./dist/cli/main.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "lint": "eslint src tests --max-warnings 0",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}

@@ -1,0 +1,227 @@
+import type { SecurityAuditor } from '../../application/ports/security-auditor.js'
+import type { SurfaceEntry } from '../../domain/value-objects/surface-entry.js'
+import type { ProofPlan } from '../../domain/value-objects/proof-plan.js'
+import { Finding, type FindingKind } from '../../domain/value-objects/finding.js'
+import { Severity } from '../../domain/value-objects/severity.js'
+
+const KINDS: readonly FindingKind[] = [
+  'missing-authorization',
+  'broken-object-level-authorization',
+  'server-secret-reaching-the-client',
+  'unvalidated-server-action-input',
+  'bypassable-middleware',
+  'ssrf',
+  'information-disclosure',
+]
+
+const SEVERITIES = new Set<string>(Object.values(Severity))
+
+export interface AnthropicOptions {
+  readonly apiKey: string
+  readonly model?: string
+  readonly baseUrl?: string
+  readonly fetchImpl?: typeof fetch
+}
+
+/**
+ * Asks a model what looks wrong, then asks it how to prove it.
+ *
+ * TWO CALLS, NOT ONE, AND THE SPLIT IS DELIBERATE. Asking for a flaw and its
+ * proof in a single answer lets the model write a request that fits the story
+ * it just told. Asking separately, with only the finding and the source in the
+ * second call, keeps the proof answerable to the code rather than to the prose.
+ *
+ * ANYTHING MALFORMED IS DROPPED IN SILENCE. A finding whose severity is a word
+ * the domain does not know, or whose line is a guess, is not repaired here: a
+ * repaired finding is one nobody wrote and nobody can defend. The audit
+ * continues with what parsed.
+ */
+export class AnthropicSecurityAuditor implements SecurityAuditor {
+  private readonly model: string
+  private readonly baseUrl: string
+  private readonly fetchImpl: typeof fetch
+
+  constructor(private readonly options: AnthropicOptions) {
+    this.model = options.model ?? 'claude-sonnet-4-5-20250929'
+    this.baseUrl = options.baseUrl ?? 'https://api.anthropic.com'
+    this.fetchImpl = options.fetchImpl ?? fetch
+  }
+
+  async suspect(entry: SurfaceEntry, source: string): Promise<Finding[]> {
+    const answer = await this.ask(
+      SUSPECT_SYSTEM,
+      [
+        `Attack surface entry: ${describe(entry)}`,
+        '',
+        'Source:',
+        '```ts',
+        source,
+        '```',
+      ].join('\n'),
+      2_000,
+    )
+    const parsed = parseJson(answer)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((raw) => {
+      const finding = toFinding(raw, entry.file)
+      return finding ? [finding] : []
+    })
+  }
+
+  async planProof(finding: Finding, entry: SurfaceEntry, source: string): Promise<ProofPlan | undefined> {
+    const answer = await this.ask(
+      PROVE_SYSTEM,
+      [
+        `Finding: ${finding.title}`,
+        `Why: ${finding.rationale}`,
+        `Location: ${finding.location}`,
+        `Reachable as: ${entry.reachableAs ?? 'not reachable by URL (Server Action)'}`,
+        '',
+        'Source:',
+        '```ts',
+        source,
+        '```',
+      ].join('\n'),
+      1_000,
+    )
+    return toProofPlan(parseJson(answer))
+  }
+
+  private async ask(system: string, user: string, maxTokens: number): Promise<string> {
+    const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': this.options.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    })
+    if (!response.ok) {
+      throw new Error(`the model refused the request: ${response.status} ${await response.text()}`)
+    }
+    const payload = (await response.json()) as { content?: { type: string; text?: string }[] }
+    return (payload.content ?? [])
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text ?? '')
+      .join('')
+  }
+}
+
+const describe = (entry: SurfaceEntry): string => {
+  const parts = [entry.kind, entry.file]
+  if (entry.reachableAs) parts.push(`reachable as ${entry.reachableAs}`)
+  if (entry.methods?.length) parts.push(`methods ${entry.methods.join(', ')}`)
+  if (entry.exports?.length) parts.push(`exported actions ${entry.exports.join(', ')}`)
+  if (entry.matcher?.length) parts.push(`matcher ${entry.matcher.join(', ')}`)
+  return parts.join(' — ')
+}
+
+/**
+ * Models wrap JSON in prose and fences however they please. Rather than beg
+ * them not to, take the first balanced array or object and parse that.
+ */
+const parseJson = (answer: string): unknown => {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(answer)
+  const candidate = fenced?.[1] ?? answer
+  const start = candidate.search(/[[{]/)
+  if (start === -1) return undefined
+  const opener = candidate[start]
+  const closer = opener === '[' ? ']' : '}'
+  const end = candidate.lastIndexOf(closer)
+  if (end <= start) return undefined
+  try {
+    return JSON.parse(candidate.slice(start, end + 1))
+  } catch {
+    return undefined
+  }
+}
+
+const toFinding = (raw: unknown, file: string): Finding | undefined => {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const shape = raw as Record<string, unknown>
+  const kind = shape['kind']
+  const severity = shape['severity']
+  if (typeof kind !== 'string' || !KINDS.includes(kind as FindingKind)) return undefined
+  if (typeof severity !== 'string' || !SEVERITIES.has(severity)) return undefined
+  try {
+    return Finding.create({
+      title: String(shape['title'] ?? ''),
+      kind: kind as FindingKind,
+      file: typeof shape['file'] === 'string' && shape['file'].length > 0 ? shape['file'] : file,
+      line: Number(shape['line'] ?? 0),
+      severity: severity as Severity,
+      rationale: String(shape['rationale'] ?? ''),
+    })
+  } catch {
+    return undefined
+  }
+}
+
+const toProofPlan = (raw: unknown): ProofPlan | undefined => {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const shape = raw as Record<string, unknown>
+  const method = shape['method']
+  const path = shape['path']
+  const expectation = shape['expectation']
+  const statuses = shape['reproducesOnStatus']
+  if (typeof method !== 'string' || typeof path !== 'string' || typeof expectation !== 'string') {
+    return undefined
+  }
+  const reproducesOnStatus = Array.isArray(statuses)
+    ? statuses.filter((value): value is number => Number.isInteger(value))
+    : []
+  const marker = shape['reproducesOnBodyContaining']
+  // A PLAN THAT RECOGNISES NOTHING CANNOT FAIL, so it would report every route
+  // as vulnerable. Refuse it rather than let it through.
+  if (reproducesOnStatus.length === 0 && typeof marker !== 'string') return undefined
+  return {
+    method: method.toUpperCase(),
+    path,
+    expectation,
+    reproducesOnStatus,
+    ...(typeof shape['body'] === 'string' ? { body: shape['body'] } : {}),
+    ...(typeof marker === 'string' && marker.length > 0 ? { reproducesOnBodyContaining: marker } : {}),
+    ...(isHeaders(shape['headers']) ? { headers: shape['headers'] } : {}),
+  }
+}
+
+const isHeaders = (value: unknown): value is Record<string, string> =>
+  typeof value === 'object' &&
+  value !== null &&
+  Object.values(value).every((header) => typeof header === 'string')
+
+const SUSPECT_SYSTEM = `You audit Next.js App Router code for flaws that static analysis cannot see.
+
+Look only for these: missing-authorization, broken-object-level-authorization,
+server-secret-reaching-the-client, unvalidated-server-action-input,
+bypassable-middleware, ssrf, information-disclosure.
+
+Report a flaw only when the code in front of you shows it. Do not report the
+absence of a defence you cannot see in this file — the check may live in a
+layout, a middleware, or a wrapper you were not given.
+
+Answer with a JSON array, empty when nothing is wrong. Each item:
+{"title": short sentence, "kind": one of the list above, "file": path,
+ "line": integer, "severity": "critical"|"high"|"medium"|"low",
+ "rationale": one or two sentences naming the code that makes it true}`
+
+const PROVE_SYSTEM = `You turn a suspected flaw into a single HTTP request that demonstrates it.
+
+The request runs against a development server with no session and no cookies.
+It must be one request, and it must distinguish a vulnerable application from a
+sound one: a request that succeeds either way proves nothing.
+
+Answer with one JSON object:
+{"method": "GET", "path": "/api/...", "headers": {...} optional,
+ "body": string optional, "expectation": what a sound application answers,
+ "reproducesOnStatus": [200], "reproducesOnBodyContaining": string optional}
+
+Set reproducesOnStatus to the codes that mean the flaw happened. If the flaw is
+a leak, use reproducesOnBodyContaining with a string that only appears when the
+data escaped. At least one of the two must be present.`
