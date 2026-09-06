@@ -26,7 +26,9 @@ export class OllamaGateway implements ModelGateway {
 
   constructor(options: OllamaOptions = {}) {
     this.model = options.model ?? DEFAULT_MODEL
-    this.baseUrl = options.baseUrl ?? 'http://localhost:11434'
+    // OLLAMA_HOST IS THE VARIABLE OLLAMA ITSELF READS. A team running the model
+    // on the one machine with a GPU should not have to fork the tool to reach it.
+    this.baseUrl = options.baseUrl ?? process.env['OLLAMA_HOST'] ?? 'http://localhost:11434'
     this.fetchImpl = options.fetchImpl ?? fetch
   }
 

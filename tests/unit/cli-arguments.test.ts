@@ -32,6 +32,24 @@ describe('reading the command line', () => {
   it('asks for help', () => {
     expect(parse(['--help'])).toBe('help')
   })
+
+  it('takes a git reference to scope the hunt to', () => {
+    expect(parse(['--since', 'origin/main'])).toMatchObject({ since: 'origin/main' })
+  })
+
+  it('takes the level that stops the build', () => {
+    expect(parse(['--fail-on', 'high'])).toMatchObject({ failOn: 'high' })
+  })
+
+  it('recognises the request to ask again about unchanged code', () => {
+    expect(parse(['--no-cache'])).toMatchObject({ noCache: true })
+    expect(parse([])).toMatchObject({ noCache: false })
+  })
+
+  it('does not mistake --no-cache for the path', () => {
+    // It takes no value, so the word after it is still an argument of its own.
+    expect(parse(['--no-cache', './apps/shop'])).toMatchObject({ path: './apps/shop' })
+  })
 })
 
 describe('saying which version is running', () => {

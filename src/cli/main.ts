@@ -13,7 +13,12 @@ import { readConfigFile } from '../infrastructure/config/config-file.js'
 import { renderMarkdown } from '../infrastructure/report/markdown.js'
 import { readBaseline, writeBaseline, ensureDirectory } from '../infrastructure/config/baseline-file.js'
 import { replay, stillFailing } from '../application/use-cases/recheck.js'
-import { compare, stopsTheBuild, type AcceptedProof } from '../domain/policies/accepted-findings.js'
+import {
+  compare,
+  stopsTheBuild,
+  type AcceptedProof,
+  type Comparison,
+} from '../domain/policies/accepted-findings.js'
 import { identityOf } from '../domain/policies/identity.js'
 import { regressionTestFor, testFileNameFor } from '../infrastructure/report/regression-test.js'
 import { disposableTarget } from '../domain/policies/safety.js'
@@ -23,6 +28,11 @@ import { RunAudit } from '../application/use-cases/run-audit.js'
 import { renderConsole } from '../infrastructure/report/console.js'
 import { toSarif } from '../infrastructure/report/sarif.js'
 import { estimateAudit } from '../domain/policies/cost-estimate.js'
+import { changedSurface } from '../domain/policies/changed-surface.js'
+import { anySeverity, failOn as thresholdNamed } from '../domain/policies/fail-on.js'
+import { changedSince } from '../infrastructure/project/git-changes.js'
+import { OpenAiGateway } from '../infrastructure/model/openai-gateway.js'
+import { CachedGateway } from '../infrastructure/model/cached-gateway.js'
 
 /**
  * THE VERSION THE TOOL ANNOUNCES IS THE ONE THAT WAS INSTALLED.
@@ -64,6 +74,12 @@ interface Options {
   readonly baseline?: string
   /** Where to write the regression tests a team commits. */
   readonly emitTests?: string
+  /** Hunt only what changed since this git reference. */
+  readonly since?: string
+  /** How bad a proven finding has to be before it stops the build. */
+  readonly failOn?: string
+  /** Ask again about code that has not changed. */
+  readonly noCache: boolean
   readonly model?: string
 }
 
@@ -88,6 +104,11 @@ const USAGE = `vulnerability-hunter-next ${VERSION}
   --recheck         replay the accepted proofs and say which are closed.
                     No model is called, so it is free and instant
   --emit-tests <dir> write a failing test per proven finding, to commit
+  --since <ref>     hunt only what changed since a git reference, so a pull
+                    request is guarded in seconds rather than minutes
+  --fail-on <level> only critical, high, medium or low and above stop the
+                    build. Everything proven is still reported
+  --no-cache        ask again about code that has not changed
   --version         print the installed version
   --help            this
 
@@ -109,7 +130,15 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
     throw new Error(`unknown format "${format}": expected console, sarif, json or markdown`)
   }
   // Flags that take no value, so the word after them is still the path.
-  const FLAGS = ['--dry-run', '--allow-destructive', '--allow-remote-target', '--local', '--accept', '--recheck']
+  const FLAGS = [
+    '--dry-run',
+    '--allow-destructive',
+    '--allow-remote-target',
+    '--local',
+    '--accept',
+    '--recheck',
+    '--no-cache',
+  ]
   const positional = argv.find(
     (argument, index) =>
       !argument.startsWith('-') &&
@@ -127,12 +156,27 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
     local: argv.includes('--local'),
     accept: argv.includes('--accept'),
     recheck: argv.includes('--recheck'),
+    noCache: argv.includes('--no-cache'),
     ...(value('--baseline') === undefined ? {} : { baseline: value('--baseline') as string }),
     ...(value('--emit-tests') === undefined ? {} : { emitTests: value('--emit-tests') as string }),
+    ...(value('--since') === undefined ? {} : { since: value('--since') as string }),
+    ...(value('--fail-on') === undefined ? {} : { failOn: value('--fail-on') as string }),
     ...(out === undefined ? {} : { out }),
     ...(model === undefined ? {} : { model }),
   }
 }
+
+/**
+ * What a reader needs from the comparison, and nothing else.
+ *
+ * A FIXED FLAW IS THE ONLY GOOD NEWS THIS TOOL EVER DELIVERS, so it is said out
+ * loud rather than left to be noticed as an absence.
+ */
+const whatChanged = (compared: Comparison): string[] => [
+  ...(compared.appeared.length > 0 ? [`${compared.appeared.length} new since the baseline was accepted.`] : []),
+  ...(compared.known.length > 0 ? [`${compared.known.length} already accepted.`] : []),
+  ...(compared.gone.length > 0 ? [`${compared.gone.length} accepted findings no longer reproduce. Re-run with --accept.`] : []),
+]
 
 /** Replays what was accepted, without asking any model. */
 const replayBaseline = async (options: Options): Promise<number> => {
@@ -178,7 +222,26 @@ const main = async (): Promise<number> => {
   }
 
   const reader = new NextProjectReader(options.path)
-  const surface = await reader.attackSurface()
+  let surface = await reader.attackSurface()
+
+  // HUNTING THE WHOLE PROJECT ON EVERY PUSH IS HOW A CHECK GETS SWITCHED OFF.
+  // Scoped to the diff a hunt takes seconds and can guard a pull request — as
+  // long as it says out loud that it narrowed itself.
+  if (options.since !== undefined) {
+    let changed: string[]
+    try {
+      changed = await changedSince(options.path, options.since)
+    } catch (failure) {
+      process.stderr.write(`${(failure as Error).message}\n`)
+      return 2
+    }
+    const whole = surface.length
+    surface = changedSurface(surface, changed)
+    process.stdout.write(
+      `Scoped to ${surface.length} of ${whole} entries, from ${changed.length} files ` +
+        `changed since ${options.since}.\n`,
+    )
+  }
 
   if (surface.length === 0) {
     // AND THIS IS THE FIRST THING MOST PEOPLE SEE, because the first command
@@ -249,11 +312,25 @@ const main = async (): Promise<number> => {
   // keeps rather than a policy somebody has to read and trust. It wins over a
   // key left in the environment: a forgotten variable must not quietly send the
   // code away when somebody asked for local.
-  const gateway = options.local
-    ? new OllamaGateway(options.model === undefined ? {} : { model: options.model })
+  const model = options.model === undefined ? {} : { model: options.model }
+  // THE KEY SAYS WHICH VENDOR IT BELONGS TO, so nobody has to name it twice and
+  // get it wrong once.
+  const chosen = options.local
+    ? new OllamaGateway(model)
     : apiKey === ''
-      ? new ClaudeSubscriptionGateway(options.model === undefined ? {} : { model: options.model })
-      : new AnthropicApiGateway({ apiKey, ...(options.model === undefined ? {} : { model: options.model }) })
+      ? new ClaudeSubscriptionGateway(model)
+      : apiKey.startsWith('sk-ant-')
+        ? new AnthropicApiGateway({ apiKey, ...model })
+        : apiKey.startsWith('sk-')
+          ? new OpenAiGateway({ apiKey, ...model })
+          : new AnthropicApiGateway({ apiKey, ...model })
+
+  // ASKING AGAIN ABOUT UNCHANGED CODE IS PAYING TWICE, in euros on a key and in
+  // seconds on a subscription. Seconds are what decide whether a check runs on
+  // every push or once a night.
+  const gateway = options.noCache
+    ? chosen
+    : new CachedGateway(chosen, join(options.path, 'node_modules/.cache/vulnerability-hunter'))
 
   const report = await new RunAudit(
     reader,
@@ -309,9 +386,29 @@ const main = async (): Promise<number> => {
 
   if (options.accept) return 0
 
+  let threshold
+  try {
+    threshold = options.failOn === undefined ? anySeverity() : thresholdNamed(options.failOn)
+  } catch (refused) {
+    process.stderr.write(`${(refused as Error).message}\n`)
+    return 2
+  }
+
+  // THE THRESHOLD DECIDES WHAT STOPS A BUILD, never what is reported: hiding a
+  // finding and failing to mention it are different things, and only one of
+  // them is honest.
+  //
+  // Matched by position, because that is the only exact match available: two
+  // findings of the same rule in the same file differ by line alone, and
+  // `identified` was built by walking `report.proven` in order.
+  const gating = identified.filter((_, at) => {
+    const severity = report.proven[at]?.finding.severity
+    return severity !== undefined && threshold.reached(severity)
+  })
+
   const compared = compare(
     readBaseline(options.path, options.baseline).map((entry) => entry.id),
-    identified.map((entry) => entry.id),
+    gating.map((entry) => entry.id),
   )
 
   const rendered =
@@ -346,9 +443,13 @@ const main = async (): Promise<number> => {
   if (options.out) await writeFile(options.out, rendered, 'utf8')
   else process.stdout.write(rendered)
 
+  for (const line of whatChanged(compared)) process.stdout.write(`${line}\n`)
+
   // A PROVEN FINDING FAILS THE BUILD. A suspicion never does : that is the
   // difference this tool exists to make, and the exit code has to carry it.
-  return report.proven.length > 0 ? 1 : 0
+  // ONCE A BASELINE EXISTS, only a finding nobody accepted does — otherwise
+  // --accept writes a file that changes nothing, and the gate is decorative.
+  return stopsTheBuild(compared) ? 1 : 0
 }
 
 /**

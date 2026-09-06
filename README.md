@@ -31,7 +31,10 @@ It runs on the Claude subscription you are already signed in to, so a hunt costs
 nothing beyond your plan. `--local` asks a model running on your own machine
 through Ollama instead — no account, no key, and the source never leaves. Set
 `ANTHROPIC_API_KEY` to use the paid API, which is what CI needs since nobody is
-signed in there.
+signed in there; an `sk-` key that is not `sk-ant-` is read as OpenAI, so a team
+already on that vendor changes nothing but the variable. `OPENAI_BASE_URL` and
+`OLLAMA_HOST` point either one somewhere else, which is what a self-hosted
+vLLM or a GPU box on the network needs.
 
 ## Quick start
 
@@ -225,6 +228,9 @@ something was proven; a suspicion never fails a build.
 | `--baseline <file>` | `vulnerability-hunter-baseline.json` | Where the baseline lives. |
 | `--recheck` | off | Replay the accepted proofs. No model, instant, free. |
 | `--emit-tests <dir>` | | Write a failing test per proven finding. |
+| `--since <ref>` | | Hunt only what a branch changed. Guards a PR in seconds. |
+| `--fail-on <level>` | `low` | Level that stops the build. Everything is still reported. |
+| `--no-cache` | off | Ask again about code that has not changed. |
 | `--allow-destructive` | off | Send proofs that change state. Disposable servers only. |
 | `--allow-remote-target` | off | Hunt a target that is not local. Same warning. |
 | `--version` | | Print the installed version. |
@@ -232,7 +238,13 @@ something was proven; a suspicion never fails a build.
 
 Exit codes: `0` nothing proven · `1` at least one proven finding · `2` the hunt
 could not run. An empty surface is `2`, not `0`: a run that read nothing is not a
-clean bill of health.
+clean bill of health. Once a baseline exists, only a finding nobody accepted
+returns `1` — a flaw you already decided to live with does not stop the build,
+and a flaw that got fixed is announced rather than left to be noticed.
+
+Answers are cached under `node_modules/.cache/vulnerability-hunter`, keyed by the
+question itself, so a file edited by one character is asked again and an
+untouched one is free. `--no-cache` turns that off.
 
 ## Two things it refuses to do on its own
 
