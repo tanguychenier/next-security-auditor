@@ -15,8 +15,11 @@ inputs:
     required: false
     default: 'http://localhost:3000'
   api-key:
-    description: 'Anthropic API key.'
-    required: true
+    description: >-
+      Anthropic or OpenAI API key. A runner has nobody signed in, so a hunt
+      there needs either this or a model of your own reachable through
+      OLLAMA_HOST or OPENAI_BASE_URL.
+    required: false
   model:
     description: 'Model used for the audit.'
     required: false
