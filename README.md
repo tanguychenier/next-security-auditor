@@ -117,9 +117,15 @@ this tool sends could demonstrate them: a race condition needs two requests in
 the same instant, and a workflow bypass needs a stateful path it does not walk.
 They are not wrong, they are unprovable here — and adding one is your decision.
 
-Some flaws do need more than one request, and get a bounded run rather than a
-single call: fewer than five would demonstrate nothing, more than a hundred
-would be an outage rather than a proof.
+Each rule carries what would count as having seen it. Most are settled by one
+request. A missing limit or a replayable webhook gets a bounded run instead —
+fewer than five requests would demonstrate nothing, more than a hundred would be
+an outage rather than a proof, and the first refusal ends the run because the
+application just defended itself.
+
+A secret written in the source is settled by neither: no request can show it, so
+the evidence is the line, and the quoted line is looked for in the file before
+the finding is reported. A model that paraphrases is a model that invents.
 
 ## What a report looks like
 

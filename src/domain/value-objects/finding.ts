@@ -1,5 +1,5 @@
 import { Severity } from './severity.js'
-import { rule, type Rule } from '../rules/rule.js'
+import { named, type Rule } from '../rules/rule.js'
 
 /**
  * A FINDING NAMES A RULE, NOT A CASE IN A CLOSED UNION.
@@ -18,6 +18,8 @@ export interface FindingShape {
   readonly line: number
   readonly severity: Severity
   readonly rationale: string
+  /** The exact line from the file, for a rule proven by reading rather than asking. */
+  readonly quote?: string
 }
 
 const nonEmpty = (value: string, field: string): string => {
@@ -37,6 +39,7 @@ export class Finding {
     readonly line: number,
     readonly severity: Severity,
     readonly rationale: string,
+    readonly quote?: string,
   ) {}
 
   static create(shape: FindingShape): Finding {
@@ -45,11 +48,12 @@ export class Finding {
     }
     return new Finding(
       nonEmpty(shape.title, 'title'),
-      typeof shape.kind === 'string' ? rule(shape.kind) : shape.kind,
+      typeof shape.kind === 'string' ? named(shape.kind) : shape.kind,
       nonEmpty(shape.file, 'file'),
       shape.line,
       shape.severity,
       nonEmpty(shape.rationale, 'rationale'),
+      shape.quote,
     )
   }
 

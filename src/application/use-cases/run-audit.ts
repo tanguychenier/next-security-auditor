@@ -5,6 +5,8 @@ import { safeToSend } from '../../domain/policies/safety.js'
 import type { VulnerabilityFinder } from '../ports/vulnerability-finder.js'
 import { Proof, ProofOutcome } from '../../domain/value-objects/proof.js'
 import { reportableFindings, type AuditedFinding } from '../../domain/policies/reportable-findings.js'
+import { quotedEvidence } from '../../domain/policies/quoted-evidence.js'
+import { runSequence } from './run-sequence.js'
 
 export interface AuditReport {
   readonly surfaceScanned: number
@@ -48,6 +50,15 @@ export class RunAudit {
     const perEntry = await inFlightBounded(entriesWithSource, this.concurrency, async ([entry, source], index) => {
       const audited: AuditedFinding[] = []
       for (const finding of suspicions[index] ?? []) {
+        // SOME FLAWS ARE SEEN BY READING, NOT BY ASKING. A key written in the
+        // source is demonstrated by the line it sits on, and the quote is
+        // checked against the file so a model that paraphrases is caught before
+        // its finding reaches the report.
+        if (finding.kind.evidence === 'source') {
+          audited.push({ finding, proof: quotedEvidence(finding, source) })
+          continue
+        }
+
         const plan = await this.auditor.planProof(finding, entry, source)
         if (plan === undefined) {
           audited.push({ finding, proof: unprovable(finding.title) })
@@ -71,7 +82,15 @@ export class RunAudit {
           continue
         }
 
-        audited.push({ finding, proof: await this.prover.run(plan), plan })
+        // A RUN OF REQUESTS WHERE ONE SHOWS NOTHING. One POST answering 200
+        // says nothing about the fifty-first, so a rule that needs repetition
+        // gets it — bounded, because a proof is a real attack.
+        const proof =
+          plan.repeat === undefined
+            ? await this.prover.run(plan)
+            : await runSequence(this.prover, plan, plan.repeat)
+
+        audited.push({ finding, proof, plan })
       }
       return audited
     })

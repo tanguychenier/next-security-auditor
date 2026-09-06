@@ -10,6 +10,13 @@ export interface ProofPlan {
   readonly reproducesOnStatus: readonly number[]
   /** A string whose presence in the body also means the flaw happened. */
   readonly reproducesOnBodyContaining?: string
+  /**
+   * How many identical requests it takes to show the flaw.
+   *
+   * ONE POST ANSWERING 200 SAYS NOTHING ABOUT THE FIFTY-FIRST. Absent for
+   * everything a single request settles, which is almost everything.
+   */
+  readonly repeat?: number
 }
 
 /**

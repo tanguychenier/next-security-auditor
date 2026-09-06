@@ -8,7 +8,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { rule, ALL_RULES, NEXT_RULES, selectedRules } from '../../src/domain/rules/rule.js'
+import { rule, named, ALL_RULES, NEXT_RULES, selectedRules } from '../../src/domain/rules/rule.js'
+import { Finding } from '../../src/domain/value-objects/finding.js'
+import { Severity } from '../../src/domain/value-objects/severity.js'
 
 describe('naming a rule', () => {
   it('needs nothing but a name, because the model knows what it is', () => {
@@ -113,5 +115,32 @@ describe('what would count as having seen a flaw', () => {
   it('keeps them in the catalogue rather than pretending they do not exist', () => {
     expect(ALL_RULES.map((entry) => entry.id)).toContain('race-condition')
     expect(ALL_RULES.length).toBeGreaterThan(NEXT_RULES.length)
+  })
+})
+
+describe('resolving a rule the catalogue already defines', () => {
+  it('keeps what would prove it, instead of answering a rule proven by request', () => {
+    // REBUILDING A RULE FROM ITS NAME LOSES ITS EVIDENCE KIND, and a secret
+    // proven by request is a secret discarded on every single run. The Symfony
+    // side hit this first; the Next side shipped it for a while.
+    expect(named('hardcoded-secret').evidence).toBe('source')
+    expect(named('missing-rate-limiting').evidence).toBe('sequence')
+  })
+
+  it('still answers a rule a team invented, proven the ordinary way', () => {
+    expect(named('our-own-rule')).toEqual({ id: 'our-own-rule', evidence: 'request' })
+  })
+
+  it('is what a finding uses, so the evidence survives the trip through a name', () => {
+    const found = Finding.create({
+      title: 'Live key committed',
+      kind: 'hardcoded-secret',
+      file: 'app/config.ts',
+      line: 2,
+      severity: Severity.Critical,
+      rationale: 'The key is written in the source.',
+    })
+
+    expect(found.kind.evidence).toBe('source')
   })
 })

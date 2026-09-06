@@ -147,6 +147,19 @@ export const ALL_RULES: readonly Rule[] = Object.entries(DEFINITIONS).map(([name
  */
 export const NEXT_RULES: readonly Rule[] = ALL_RULES.filter((entry) => entry.evidence !== 'unprovable')
 
+/**
+ * The catalogue's rule for a name, or a new one if nobody ships it.
+ *
+ * REBUILDING A RULE FROM ITS NAME LOSES WHAT WOULD PROVE IT. `rule('hardcoded-secret')`
+ * answers a rule proven by request, because a bare name carries no evidence
+ * kind — and a secret proven by request is a secret discarded on every run. A
+ * name the catalogue knows must come back as the rule the catalogue defines.
+ */
+export const named = (name: string): Rule => {
+  const rebuilt = rule(name)
+  return ALL_RULES.find((entry) => entry.id === rebuilt.id) ?? rebuilt
+}
+
 export interface RuleSelection {
   /** Hunt these and nothing else. */
   readonly only?: readonly string[]
