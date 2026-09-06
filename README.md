@@ -127,6 +127,53 @@ HIGH  Invoice readable without a session
 The discarded count is printed even when it is large, and especially then: it is
 the only honest signal you have about the model behind the tool.
 
+## Making it a required check
+
+A model does not answer the same thing twice, so a hunt on its own cannot guard
+a merge: it would fail a pull request that changed nothing. A committed baseline
+turns that around — what matters stops being what the model found and becomes
+the difference.
+
+```bash
+npx vulnhunt . --target http://localhost:3000            # 2 proven, exit 1
+npx vulnhunt . --target http://localhost:3000 --accept   # decided: these two are known
+npx vulnhunt . --target http://localhost:3000            # 2 already in the baseline, exit 0
+```
+
+`vulnerability-hunter-baseline.json` is committed next to your code. A finding
+keeps its identity across runs because it is keyed on the rule, the file and the
+symbol it sits in — not on the line number, which moves the first time somebody
+adds an import.
+
+Only a finding nobody accepted stops a build. A flaw that has been fixed is
+announced rather than forgotten, because otherwise nobody prunes the file and a
+stale entry eventually swallows a real flaw in silence.
+
+## Did the fix work?
+
+```bash
+npx vulnhunt . --recheck
+  closed       1772966f7718f56c  Invoice readable without a session
+  still open   3ad902610ff8ca08  Server Action callable by anyone
+
+1 closed, 1 still open, 0 could not be replayed.
+```
+
+The requests that proved each flaw are already in the baseline, so this replays
+them: **no model is called**, it is instant and free, and it answers the same
+way twice. A proof that could not run counts as neither closed nor open — the
+server was down is not the flaw is gone.
+
+## The test you keep
+
+```bash
+npx vulnhunt . --emit-tests tests/security
+```
+
+One failing test per proven finding, for you to commit. It fails while the flaw
+is open, passes once it is closed, and keeps passing afterwards — in your own
+suite, with no key, no model and no network. It outlives this tool.
+
 ## Passing again
 
 A model does not always give the same answer to the same question, so the hunt
@@ -160,11 +207,15 @@ something was proven; a suspicion never fails a build.
 | Flag | Default | |
 | --- | --- | --- |
 | `--target <url>` | `http://localhost:3000` | Running application used to prove findings. |
-| `--format <fmt>` | `console` | `console`, `sarif` or `json`. |
+| `--format <fmt>` | `console` | `console`, `sarif`, `json` or `markdown`. |
 | `--out <file>` | stdout | Write the report to a file. |
 | `--model <name>` | `sonnet` | Model to hunt with. |
 | `--dry-run` | off | Map the surface, price the hunt, call nothing. |
 | `--local` | off | Ask Ollama on this machine. Nothing leaves it. |
+| `--accept` | off | Write what this run proved into the baseline. |
+| `--baseline <file>` | `vulnerability-hunter-baseline.json` | Where the baseline lives. |
+| `--recheck` | off | Replay the accepted proofs. No model, instant, free. |
+| `--emit-tests <dir>` | | Write a failing test per proven finding. |
 | `--allow-destructive` | off | Send proofs that change state. Disposable servers only. |
 | `--allow-remote-target` | off | Hunt a target that is not local. Same warning. |
 | `--version` | | Print the installed version. |
