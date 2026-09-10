@@ -45,12 +45,23 @@ export const readAccepted = (json: string): AcceptedProof[] => {
     throw new Error(`the accepted findings file could not be read: ${(failure as Error).message}`)
   }
 
-  if (!Array.isArray(decoded.accepted)) return []
+  // THE SAME RULE ONE LINE DOWN: a file whose shape is wrong is refused too.
+  // Reading it as empty would accept nothing, fail everything, and read exactly
+  // like a real regression — the one mistake this function exists to avoid.
+  if (!Array.isArray(decoded.accepted)) {
+    throw new Error('the accepted findings file could not be read: "accepted" is not a list of findings')
+  }
 
-  return decoded.accepted.flatMap((entry): AcceptedProof[] => {
-    if (typeof entry !== 'object' || entry === null) return []
+  return decoded.accepted.flatMap((entry, at): AcceptedProof[] => {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new Error(`the accepted findings file could not be read: entry ${at} is not a finding`)
+    }
     const shape = entry as Record<string, unknown>
-    if (typeof shape['id'] !== 'string') return []
+    // AN ENTRY WITHOUT AN IDENTITY ACCEPTS NOTHING, and dropping it in silence
+    // turns a hand-edited baseline into a gate that stopped protecting.
+    if (typeof shape['id'] !== 'string') {
+      throw new Error(`the accepted findings file could not be read: entry ${at} has no id`)
+    }
     const plan = planIn(shape['proof'])
     return [
       {

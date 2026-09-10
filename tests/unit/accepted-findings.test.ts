@@ -67,6 +67,18 @@ describe('the file a team commits', () => {
     expect(() => readAccepted('{ this is not json')).toThrow('could not be read')
   })
 
+  it('refuses a file whose shape is wrong rather than reading it as empty', () => {
+    // AN EMPTY LIST ACCEPTS NOTHING AND FAILS EVERYTHING, which reads like a
+    // regression that is not there. Refusing says which file to go and look at.
+    expect(() => readAccepted('{"accepted":{"id":"aaaa"}}')).toThrow('not a list of findings')
+    expect(() => readAccepted('{}')).toThrow('not a list of findings')
+  })
+
+  it('refuses an entry that carries no identity', () => {
+    expect(() => readAccepted('{"accepted":[{"rule":"ssrf","file":"app/x.ts"}]}')).toThrow('entry 0 has no id')
+    expect(() => readAccepted('{"accepted":["aaaa"]}')).toThrow('entry 0 is not a finding')
+  })
+
   it('writes it sorted, so committing twice gives the same bytes', () => {
     const written = writeAccepted([
       { id: 'bbbb', rule: 'ssrf', file: 'b.ts', title: 'B' },
