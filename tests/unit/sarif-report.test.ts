@@ -46,7 +46,7 @@ describe('emitting SARIF that GitHub actually accepts', () => {
   it('places the result on the exact file and line', () => {
     const location = toSarif(audited, '0.1.0').runs[0]?.results[0]?.locations[0]?.physicalLocation
 
-    expect(location?.artifactLocation.uri).toBe('app/api/invoices/[id]/route.ts')
+    expect(location?.artifactLocation.uri).toBe('app/api/invoices/%5Bid%5D/route.ts')
     expect(location?.region.startLine).toBe(4)
   })
 
@@ -70,5 +70,38 @@ describe('emitting SARIF that GitHub actually accepts', () => {
 
     expect(sarif.runs[0]?.results).toEqual([])
     expect(sarif.runs[0]?.tool.driver.name).toBe('vulnerability-hunter-next')
+  })
+})
+
+describe('the uri a viewer resolves', () => {
+  it('percent-encodes the brackets every dynamic segment has', () => {
+    // `[` AND `]` ARE NOT PATH CHARACTERS in a uri reference, and the file
+    // shape this framework produces most is the one that has them.
+    const log = toSarif(
+      [
+        {
+          finding: Finding.create({
+            title: 'Invoice readable without a session',
+            kind: 'broken-object-level-authorization',
+            file: 'app/api/invoices/[id]/route.ts',
+            line: 4,
+            severity: Severity.High,
+            rationale: 'params.id reaches the database with no ownership check.',
+          }),
+          proof: Proof.create({
+            outcome: ProofOutcome.Reproduced,
+            request: 'GET http://localhost:3000/api/invoices/1',
+            expectation: 'responds 401 or 403',
+            observed: '200 OK, 64 bytes',
+          }),
+        },
+      ],
+      '1.0.0',
+    )
+
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri
+
+    expect(uri).toBe('app/api/invoices/%5Bid%5D/route.ts')
+    expect(uri).not.toContain('[')
   })
 })

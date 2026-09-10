@@ -37,6 +37,16 @@ const LEVELS: Readonly<Record<Severity, SarifResult['level']>> = Object.freeze({
   [Severity.Low]: 'note',
 })
 
+/**
+ * A path written as SARIF asks for it: a URI reference.
+ *
+ * `[` AND `]` ARE NOT PATH CHARACTERS, and every dynamic segment this framework
+ * has is written with them. `app/api/invoices/[id]/route.ts` went out as-is, so
+ * the one file shape Next.js produces most was also the one carrying an invalid
+ * uri into whichever viewer read the report.
+ */
+const asUri = (path: string): string => encodeURI(path)
+
 export const toSarif = (audited: readonly AuditedFinding[], version: string): SarifLog => ({
   $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
   version: '2.1.0',
@@ -69,7 +79,7 @@ export const toSarif = (audited: readonly AuditedFinding[], version: string): Sa
         locations: [
           {
             physicalLocation: {
-              artifactLocation: { uri: finding.file },
+              artifactLocation: { uri: asUri(finding.file) },
               region: { startLine: finding.line },
             },
           },
