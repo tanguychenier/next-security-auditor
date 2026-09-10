@@ -94,7 +94,32 @@ describe('what the model wrote is input, not source', () => {
         plan: { ...accepted.plan!, expectation: 'refuses\n    process.exit(1)' },
       }) ?? ''
 
-    expect(written).toContain('A sound one refuses instead: refuses process.exit(1)')
+    expect(written).toContain('A sound application refuses instead: refuses process.exit(1)')
+  })
+
+  it('asserts on the body when the body is what proved the flaw', () => {
+    // A SOUND APPLICATION ANSWERS 200 HERE TOO. Asserting on the status alone
+    // wrote a test that fails after the key is removed, and a team deletes a
+    // test that lies to them.
+    const written =
+      regressionTestFor({
+        ...accepted,
+        plan: { ...accepted.plan!, reproducesOnStatus: [], reproducesOnBodyContaining: 'sk_live_' },
+      }) ?? ''
+
+    expect(written).toContain('expect(await response.text()).not.toContain("sk_live_")')
+    expect(written).not.toContain('response.status')
+  })
+
+  it('asserts on both when both proved it', () => {
+    const written =
+      regressionTestFor({
+        ...accepted,
+        plan: { ...accepted.plan!, reproducesOnStatus: [200], reproducesOnBodyContaining: 'sk_live_' },
+      }) ?? ''
+
+    expect(written).toContain('expect([200]).not.toContain(response.status)')
+    expect(written).toContain('expect(await response.text()).not.toContain("sk_live_")')
   })
 
   it('refuses to write outside the directory it was given', () => {

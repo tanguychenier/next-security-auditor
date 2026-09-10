@@ -41,8 +41,31 @@ export const regressionTestFor = (accepted: AcceptedProof, target = 'http://loca
   if (accepted.plan === undefined) return undefined
 
   const plan = accepted.plan
-  const refused = plan.reproducesOnStatus.join(', ') || '200'
   const expectation = plan.expectation.replace(/\.$/, '')
+
+  // THE TEST IS THE MIRROR OF THE PROOF, so it asserts on whatever made the
+  // proof reproduce. A leak found by reading the body was answered 200 by a
+  // sound application too: asserting on the status alone wrote a test that
+  // fails forever, and a team deletes a test that lies to them.
+  const marker = plan.reproducesOnBodyContaining
+  const onBody = marker !== undefined && marker.length > 0
+  const onStatus = plan.reproducesOnStatus.length > 0
+  const refused = plan.reproducesOnStatus.join(', ')
+
+  const assertions = [
+    ...(onStatus
+      ? [
+          `    // The hunt reported this because the application answered ${refused}.`,
+          `    expect([${refused}]).not.toContain(response.status)`,
+        ]
+      : []),
+    ...(onBody
+      ? [
+          `    // The hunt reported this because the body carried ${asComment(literal(marker))}.`,
+          `    expect(await response.text()).not.toContain(${literal(marker)})`,
+        ]
+      : []),
+  ].join('\n')
 
   return `import { describe, expect, it } from 'vitest'
 
@@ -59,9 +82,8 @@ describe(${literal(accepted.rule)}, () => {
   it('refuses the request that proved the flaw', async () => {
     const response = await fetch(${literal(`${target}${plan.path}`)}, { method: ${literal(plan.method)}, redirect: 'manual' })
 
-    // The hunt reported this because the application answered ${refused}.
-    // A sound one refuses instead: ${asComment(expectation)}.
-    expect([${refused}]).not.toContain(response.status)
+    // A sound application refuses instead: ${asComment(expectation)}.
+${assertions}
   })
 })
 `
