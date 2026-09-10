@@ -304,7 +304,7 @@ const main = async (): Promise<number> => {
         // names cannot be compared with what they know their app exposes, so a
         // missing route would go unnoticed until the hunt was paid for.
         ...surface.flatMap((entry) => [
-          `  ${entry.kind.padEnd(14)} ${entry.file}`,
+          `  ${entry.kind.padEnd(16)} ${entry.file}`,
           ...(entry.reachableAs === undefined
             ? []
             : [`                 ${(entry.methods ?? []).join('|') || 'ANY'} ${entry.reachableAs}`]),

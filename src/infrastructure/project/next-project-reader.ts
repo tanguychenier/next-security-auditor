@@ -62,8 +62,8 @@ export class NextProjectReader implements ProjectReader {
     if (/^(src\/)?middleware\.(ts|js)$/.test(file)) {
       return { kind: 'middleware', file, matcher: matcherOf(source) }
     }
-    if (isUnderPages(file)) return this.classifyPagesRouter(file, source)
-    if (!isUnderApp(file)) return undefined
+    if (isUnderPages(file)) return this.classifyPagesRouter(file, source) ?? shippedToTheBrowser(file, source)
+    if (!isUnderApp(file)) return shippedToTheBrowser(file, source)
 
     if (/\/route\.(ts|js|tsx|jsx)$/.test(file)) {
       const methods = HTTP_METHODS.filter((method) => exportsName(source, method))
@@ -80,7 +80,7 @@ export class NextProjectReader implements ProjectReader {
     if (/\/page\.(tsx|jsx|ts|js)$/.test(file) && /\b(searchParams|params)\b/.test(source)) {
       return { kind: 'page', file, reachableAs: routeOf(file) }
     }
-    return undefined
+    return shippedToTheBrowser(file, source)
   }
 
   /**
@@ -150,6 +150,21 @@ const exportsName = (source: string, name: string): boolean =>
 
 const declaresUseServer = (source: string): boolean =>
   /^\s*(['"])use server\1/m.test(source.slice(0, 200))
+
+const declaresUseClient = (source: string): boolean =>
+  /^\s*(['"])use client\1/m.test(source.slice(0, 200))
+
+/**
+ * A file whose whole content reaches the browser.
+ *
+ * THE CATALOGUE ALREADY NAMED THESE RULES and nothing could carry them:
+ * hardcoded-secret, server-secret-reaching-the-client and secret-in-public-env
+ * all describe a Client Component, and a Client Component was never surfaced
+ * unless it happened to also be a page reading searchParams. A key written in
+ * one shipped, run after run, with the report saying nothing.
+ */
+const shippedToTheBrowser = (file: string, source: string): SurfaceEntry | undefined =>
+  declaresUseClient(source) ? { kind: 'client-component', file } : undefined
 
 const exportedFunctions = (source: string): string[] => {
   const names = new Set<string>()

@@ -81,7 +81,7 @@ describe('auditing a Next.js project end to end', () => {
   it('reports only the finding whose proof reproduced, and says how many it dropped', async () => {
     const report = await new RunAudit(new NextProjectReader(shop), suspicious, honestProver).execute()
 
-    expect(report.surfaceScanned).toBe(4)
+    expect(report.surfaceScanned).toBe(5)
     expect(report.suspected).toBe(2)
     expect(report.proven).toHaveLength(1)
     expect(report.proven[0]?.finding.title).toBe('Invoice readable without a session')
@@ -107,6 +107,6 @@ describe('auditing a Next.js project end to end', () => {
     const report = await new RunAudit(new NextProjectReader(shop), calm, honestProver).execute()
 
     expect(report).toMatchObject({ suspected: 0, discarded: 0, proven: [] })
-    expect(report.surfaceScanned).toBe(4)
+    expect(report.surfaceScanned).toBe(5)
   })
 })

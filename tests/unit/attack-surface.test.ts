@@ -97,3 +97,24 @@ describe('mapping an application that still uses the pages router', () => {
     expect(surface.some((entry) => entry.file.includes('_app'))).toBe(false)
   })
 })
+
+describe('what ships to the browser', () => {
+  it('surfaces a client component wherever it lives', async () => {
+    // THREE RULES IN THE CATALOGUE DESCRIBE THIS FILE — hardcoded-secret,
+    // server-secret-reaching-the-client, secret-in-public-env — and none of
+    // them could ever fire, because a component outside app/ was never read
+    // and one inside it only counted when it happened to be a page taking
+    // searchParams. A key written in one shipped with the report silent.
+    const surface = await new NextProjectReader(shop).attackSurface()
+    const shipped = surface.filter((entry) => entry.kind === 'client-component')
+
+    expect(shipped.map((entry) => entry.file)).toEqual(['components/CheckoutButton.tsx'])
+  })
+
+  it('gives it no url, because it is not reached by one', async () => {
+    const surface = await new NextProjectReader(shop).attackSurface()
+    const shipped = surface.find((entry) => entry.kind === 'client-component')
+
+    expect(shipped?.reachableAs).toBeUndefined()
+  })
+})

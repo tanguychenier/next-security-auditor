@@ -1,5 +1,13 @@
-/** The only four ways untrusted input reaches the server in the App Router. */
-export type SurfaceKind = 'route-handler' | 'server-action' | 'middleware' | 'page'
+/**
+ * Where a Next.js application meets the outside world.
+ *
+ * The first four are how untrusted input reaches the server. The last one is
+ * the other direction, and it is why it belongs here: a Client Component is a
+ * file whose whole content ships to the browser, so what it holds has already
+ * left. The catalogue names rules for that, and without this kind they were
+ * rules nothing could ever carry.
+ */
+export type SurfaceKind = 'route-handler' | 'server-action' | 'middleware' | 'page' | 'client-component'
 
 export interface SurfaceEntry {
   readonly kind: SurfaceKind
