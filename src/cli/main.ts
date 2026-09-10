@@ -121,9 +121,21 @@ Exit codes: 0 nothing proven, 1 at least one proven finding, 2 the audit could n
 export const parse = (argv: readonly string[]): Options | 'help' | 'version' => {
   if (argv.includes('--help') || argv.includes('-h')) return 'help'
   if (argv.includes('--version')) return 'version'
+  /**
+   * A FLAG THAT TAKES A VALUE AND IS GIVEN NONE IS A MISTAKE, NOT A DEFAULT.
+   *
+   * Taking whatever follows meant `--target` at the end of a line silently
+   * hunted localhost:3000, and `--out --format sarif` wrote the report to a
+   * file called "--format" while the reader waited for it on their screen.
+   */
   const value = (flag: string): string | undefined => {
     const index = argv.indexOf(flag)
-    return index === -1 ? undefined : argv[index + 1]
+    if (index === -1) return undefined
+    const next = argv[index + 1]
+    if (next === undefined || next.startsWith('-')) {
+      throw new Error(`${flag} needs a value, and was given ${next === undefined ? 'nothing' : `"${next}"`}`)
+    }
+    return next
   }
   const format = value('--format') ?? 'console'
   if (format !== 'console' && format !== 'sarif' && format !== 'json' && format !== 'markdown') {

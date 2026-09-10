@@ -25,6 +25,22 @@ describe('reading the command line', () => {
     expect(() => parse(['--format', 'pdf'])).toThrow('unknown format')
   })
 
+  it('refuses a flag that takes a value and was given none', () => {
+    // `--target` last on the line silently hunted localhost:3000, which is a
+    // different server from the one the operator named.
+    expect(() => parse(['/proj', '--target'])).toThrow('--target needs a value')
+    expect(() => parse(['/proj', '--baseline'])).toThrow('--baseline needs a value')
+    expect(() => parse(['/proj', '--model'])).toThrow('--model needs a value')
+  })
+
+  it('refuses a flag that swallowed the flag after it', () => {
+    // `--out --format sarif` wrote the report into a file named "--format".
+    expect(() => parse(['/proj', '--out', '--format', 'sarif'])).toThrow('--out needs a value')
+    expect(() => parse(['/proj', '--emit-tests', '--accept'])).toThrow('--emit-tests needs a value')
+    expect(() => parse(['/proj', '--since', '--no-cache'])).toThrow('--since needs a value')
+    expect(() => parse(['/proj', '--target', '--dry-run'])).toThrow('--target needs a value')
+  })
+
   it('recognises the dry run', () => {
     expect(parse(['--dry-run'])).toMatchObject({ dryRun: true })
   })
