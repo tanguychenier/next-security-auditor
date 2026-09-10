@@ -1,4 +1,5 @@
 import type { ModelGateway, Question } from '../../application/ports/model-gateway.js'
+import { disposableTarget } from '../../domain/policies/safety.js'
 
 export interface OllamaOptions {
   readonly model?: string
@@ -29,6 +30,16 @@ export class OllamaGateway implements ModelGateway {
     // OLLAMA_HOST IS THE VARIABLE OLLAMA ITSELF READS. A team running the model
     // on the one machine with a GPU should not have to fork the tool to reach it.
     this.baseUrl = options.baseUrl ?? process.env['OLLAMA_HOST'] ?? 'http://localhost:11434'
+    // "NOTHING LEAVES THE MACHINE" IS A PROMISE A SOCKET KEEPS, and this is the
+    // socket. A variable left in the environment must not turn the local mode
+    // into shipping somebody's employer's code to a public host. The GPU box on
+    // the office network still passes: it is the internet that does not.
+    if (!disposableTarget(this.baseUrl)) {
+      throw new Error(
+        `the local hunt refuses to send the source to ${this.baseUrl}: ` +
+          'it is not this machine nor a private network. Unset OLLAMA_HOST, or point it at one.',
+      )
+    }
     this.fetchImpl = options.fetchImpl ?? fetch
   }
 

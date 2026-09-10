@@ -25,6 +25,18 @@ const answering = (body: unknown, ok = true, status = 200) => {
   return { gateway: new OllamaGateway({ model: 'qwen2.5-coder:7b', fetchImpl }), seen }
 }
 
+describe('keeping the local hunt local', () => {
+  it('refuses to ship the source to a public host', () => {
+    // A FORGOTTEN VARIABLE MUST NOT BREAK THE ONE PROMISE THIS MODE MAKES.
+    expect(() => new OllamaGateway({ baseUrl: 'https://ollama.example.com' })).toThrow(/refuses to send the source/)
+  })
+
+  it('still reaches the one machine with a GPU on the office network', () => {
+    expect(() => new OllamaGateway({ baseUrl: 'http://192.168.1.40:11434' })).not.toThrow()
+    expect(() => new OllamaGateway({ baseUrl: 'http://gpu-box:11434' })).not.toThrow()
+  })
+})
+
 describe('asking a model on this machine', () => {
   it('returns what the local model answered', async () => {
     const { gateway } = answering({ message: { content: '[]' }, done: true })
