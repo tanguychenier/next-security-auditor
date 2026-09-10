@@ -48,6 +48,53 @@ describe('running a proof against a live application', () => {
     expect(proof.observed).toContain('ECONNREFUSED')
   })
 
+  it('refuses a plan that would move the attack to another host', async () => {
+    // THE MODEL READS THE AUDITED REPOSITORY, so its answer is input. An
+    // absolute path makes `new URL(path, base)` forget the base, and the hunt
+    // would leave the server the operator named.
+    const sent: string[] = []
+    const recording = (async (url: unknown) => {
+      sent.push(String(url))
+      return new Response('', { status: 200 })
+    }) as unknown as typeof fetch
+
+    const proof = await new HttpProofRunner('http://localhost:3000', 5_000, recording).run({
+      ...plan,
+      path: 'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+    })
+
+    expect(sent).toEqual([])
+    expect(proof.outcome).toBe(ProofOutcome.NotRunnable)
+    expect(proof.observed).toContain('169.254.169.254')
+  })
+
+  it('refuses a protocol-relative path, which is absolute in disguise', async () => {
+    const sent: string[] = []
+    const recording = (async (url: unknown) => {
+      sent.push(String(url))
+      return new Response('', { status: 200 })
+    }) as unknown as typeof fetch
+
+    const proof = await new HttpProofRunner('http://localhost:3000', 5_000, recording).run({
+      ...plan,
+      path: '//attacker.example/steal',
+    })
+
+    expect(sent).toEqual([])
+    expect(proof.outcome).toBe(ProofOutcome.NotRunnable)
+  })
+
+  it('still sends an absolute path that names the target itself', async () => {
+    // Refusing this one would cost a real proof: a model quoting the whole URL
+    // back is writing the same request, not a different one.
+    const proof = await new HttpProofRunner('http://localhost:3000', 5_000, answering(200)).run({
+      ...plan,
+      path: 'http://localhost:3000/api/invoices/1',
+    })
+
+    expect(proof.outcome).toBe(ProofOutcome.Reproduced)
+  })
+
   it('reproduces when a leaked secret appears in the body, whatever the status', async () => {
     const leaking: ProofPlan = { ...plan, reproducesOnStatus: [], reproducesOnBodyContaining: 'sk_live_' }
 

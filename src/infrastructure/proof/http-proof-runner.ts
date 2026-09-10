@@ -12,6 +12,10 @@ import { Proof, ProofOutcome } from '../../domain/value-objects/proof.js'
  * A network error is NotRunnable, never NotReproduced. "The server was down"
  * and "the server refused the attack" are different facts, and collapsing them
  * would let a broken setup look like a clean bill of health.
+ *
+ * IT ONLY EVER REACHES THE TARGET. The path comes from a model reading a
+ * repository, so it is input, not instruction: a plan that resolves to another
+ * host is refused rather than sent.
  */
 export class HttpProofRunner implements ProofRunner {
   constructor(
@@ -21,8 +25,27 @@ export class HttpProofRunner implements ProofRunner {
   ) {}
 
   async run(plan: ProofPlan): Promise<Proof> {
-    const target = new URL(plan.path, this.baseUrl).toString()
+    const base = new URL(this.baseUrl)
+    const resolved = new URL(plan.path, base)
+    const target = resolved.toString()
     const request = `${plan.method} ${target}`
+
+    // THE PLAN SAYS WHAT TO SEND, NEVER WHERE. `new URL(path, base)` drops the
+    // base the moment the path is absolute, so a model answering
+    // "http://169.254.169.254/latest/meta-data/" would move the attack off the
+    // server the operator named and onto one they did not. The target is chosen
+    // once, on the command line, where it is checked.
+    if (resolved.protocol !== base.protocol || resolved.host !== base.host) {
+      return Proof.create({
+        outcome: ProofOutcome.NotRunnable,
+        request: `none: ${plan.method} ${target} was refused`,
+        expectation: plan.expectation,
+        observed:
+          `the plan points at ${resolved.protocol}//${resolved.host}, which is not the target ` +
+          `${base.protocol}//${base.host}: a proof is sent at the application under test and nowhere else`,
+      })
+    }
+
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
