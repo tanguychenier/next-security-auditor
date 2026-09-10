@@ -198,4 +198,21 @@ describe('the way npm actually installs it', () => {
     expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/)
     expect(result.code).toBe(0)
   })
+
+  it('says a path is missing rather than calling the project clean', async () => {
+    // A TYPO IN A CI PATH USED TO READ AS A VERDICT ON THE CODE: the walk
+    // returns nothing for a directory it cannot open, and the run then
+    // announced that no attack surface was found in it.
+    const missing = join(tmpdir(), 'vulnhunt-there-is-no-such-directory')
+
+    const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
+      execFile(process.execPath, [binary, missing, '--dry-run'], (error, _stdout, stderr) =>
+        resolve({ code: error === null ? 0 : ((error as { code?: number }).code ?? 1), stderr }),
+      )
+    })
+
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain('is not a directory this hunt can read')
+    expect(result.stderr).not.toContain('No Next.js attack surface')
+  })
 })

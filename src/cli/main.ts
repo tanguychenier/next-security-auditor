@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises'
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { NextProjectReader } from '../infrastructure/project/next-project-reader.js'
@@ -33,6 +33,15 @@ import { anySeverity, failOn as thresholdNamed } from '../domain/policies/fail-o
 import { changedSince } from '../infrastructure/project/git-changes.js'
 import { OpenAiGateway } from '../infrastructure/model/openai-gateway.js'
 import { CachedGateway } from '../infrastructure/model/cached-gateway.js'
+
+/** Whether the audited path is a directory at all. */
+const statSafely = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
 
 /**
  * THE VERSION THE TOOL ANNOUNCES IS THE ONE THAT WAS INSTALLED.
@@ -231,6 +240,14 @@ const main = async (): Promise<number> => {
   if (options === 'help') {
     process.stdout.write(`${USAGE}\n`)
     return 0
+  }
+
+  // A PATH THAT IS NOT THERE IS A TYPO, NOT A CLEAN PROJECT. The walk returns
+  // nothing for a directory it cannot open, and "no attack surface found" then
+  // reads as a verdict on the code instead of a verdict on the path.
+  if (!statSafely(options.path)) {
+    process.stderr.write(`${options.path} is not a directory this hunt can read.\n`)
+    return 2
   }
 
   const reader = new NextProjectReader(options.path)
