@@ -58,6 +58,19 @@ describe('asking the model through the subscription', () => {
     expect(seen.input).toBe('the user message')
   })
 
+  it('does not let the operator settings choose the language of the report', async () => {
+    // MEASURED: on a machine holding "language": "fr", the CLI applied it over
+    // the system prompt and a whole hunt came back in French. That text lands
+    // in SARIF and in pull request annotations, so the same repository read
+    // differently depending on who scanned it.
+    const { gateway, seen } = answering('{"result":"[]","is_error":false}')
+
+    await gateway.ask('the system prompt', 'the user message', 2000)
+
+    expect(seen.command).toContain('--settings')
+    expect(seen.command).toContain('{"language":"en"}')
+  })
+
   it('carries the chosen model', async () => {
     const { gateway, seen } = answering('{"result":"[]","is_error":false}')
 

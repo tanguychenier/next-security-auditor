@@ -82,7 +82,25 @@ export class ClaudeSubscriptionGateway implements ModelGateway {
   }
 
   private commandFor(system: string): string[] {
-    return [this.binary, '--print', '--output-format', 'json', '--model', this.model, '--system-prompt', system, '--allowed-tools', '']
+    // THE OPERATOR'S OWN SETTINGS ARE NOT THIS REPORT'S SETTINGS. On a machine
+    // holding "language": "fr", the CLI applied it over the system prompt and a
+    // whole hunt came back in French — titles, rationales, expectations — and
+    // that text is what travels into SARIF and into pull request annotations.
+    // The same repository must not read differently depending on who scanned it.
+    return [
+      this.binary,
+      '--print',
+      '--output-format',
+      'json',
+      '--model',
+      this.model,
+      '--settings',
+      '{"language":"en"}',
+      '--system-prompt',
+      system,
+      '--allowed-tools',
+      '',
+    ]
   }
 
   private readAnswer(result: CommandResult): string {
