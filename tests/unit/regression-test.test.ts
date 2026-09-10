@@ -56,3 +56,49 @@ describe('the test a team commits', () => {
     expect(testFileNameFor(accepted)).toBe('MissingAuthorization.aaaaaaaaaaaaaaaa.test.ts')
   })
 })
+
+describe('what the model wrote is input, not source', () => {
+  // THIS FILE IS COMMITTED AND RUN BY SOMEBODY'S CI ON EVERY PUSH. A quote in a
+  // path, a `*/` in a title, a newline in an expectation: each one closed the
+  // literal or the comment it sat in and left executable code behind it.
+
+  it('keeps a quoted path inside its literal', () => {
+    const path = "/x', { method: 'GET' }); process.exit(1); ('"
+
+    const written = regressionTestFor({ ...accepted, plan: { ...accepted.plan!, path } }) ?? ''
+
+    // The payload survives as text and is inert, which is the whole point: it
+    // sits inside one string argument instead of closing it.
+    expect(written).toContain(`await fetch(${JSON.stringify(`http://localhost:3000${path}`)}, {`)
+    expect(written.match(/await fetch\(/g)).toHaveLength(1)
+  })
+
+  it('keeps a quoted method inside its literal', () => {
+    const method = "GET', redirect: 'manual' }); process.exit(1); ('"
+
+    const written = regressionTestFor({ ...accepted, plan: { ...accepted.plan!, method } }) ?? ''
+
+    expect(written).toContain(`method: ${JSON.stringify(method)}, redirect: 'manual' })`)
+  })
+
+  it('keeps a title from closing the comment it sits in', () => {
+    const written = regressionTestFor({ ...accepted, title: 'oops */ process.exit(1); /*' }) ?? ''
+
+    expect(written).not.toContain('*/ process.exit(1);')
+  })
+
+  it('keeps an expectation on the one line it was given', () => {
+    const written =
+      regressionTestFor({
+        ...accepted,
+        plan: { ...accepted.plan!, expectation: 'refuses\n    process.exit(1)' },
+      }) ?? ''
+
+    expect(written).toContain('A sound one refuses instead: refuses process.exit(1)')
+  })
+
+  it('refuses to write outside the directory it was given', () => {
+    expect(testFileNameFor({ ...accepted, rule: '../../../../tmp/pwned' })).not.toContain('/')
+    expect(testFileNameFor({ ...accepted, id: '../escape' })).not.toContain('/')
+  })
+})
