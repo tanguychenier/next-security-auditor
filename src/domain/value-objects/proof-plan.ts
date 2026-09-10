@@ -47,20 +47,26 @@ const REFUSALS = [
  * report this tool will ever print.
  */
 export const proofPlan = (shape: ProofPlan): ProofPlan => {
-  const statuses = [...shape.reproducesOnStatus]
+  const asked = [...shape.reproducesOnStatus]
   const marker = shape.reproducesOnBodyContaining
 
   // A PLAN THAT RECOGNISES NOTHING CANNOT FAIL, so it would report every route
   // as vulnerable.
-  if (statuses.length === 0 && (marker === undefined || marker.length === 0)) {
+  if (asked.length === 0 && (marker === undefined || marker.length === 0)) {
     throw new TypeError('a proof plan says what makes it reproduce: without that it can never fail')
   }
 
-  const onlyRefusals = statuses.length > 0 && statuses.every((status) => DEFENDED.includes(status))
+  // ONE DEFENDED STATUS IN THE LIST IS ENOUGH TO RUIN THE PLAN. Measured on a
+  // real run: a model answered [200, 404] for an uncovered middleware path, the
+  // route did not exist, the server said 404, and the hunt reported a proven
+  // vulnerability whose evidence was the application not having that page.
+  // Refusing only when every status is a refusal let that through.
+  const statuses = asked.filter((status) => !DEFENDED.includes(status))
   const markerIsRefusal =
     marker !== undefined && REFUSALS.some((refusal) => marker.toLowerCase().includes(refusal))
+  const hasMarker = marker !== undefined && marker.length > 0
 
-  if (onlyRefusals || markerIsRefusal) {
+  if ((statuses.length === 0 && !hasMarker) || markerIsRefusal) {
     throw new TypeError(
       'this proof plan recognises the application defending itself, not the flaw: ' +
         'it would run, fail, and report a real flaw as not reproduced',
