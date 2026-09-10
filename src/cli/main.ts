@@ -278,8 +278,9 @@ const main = async (): Promise<number> => {
     // try next, rather than only what failed.
     process.stderr.write(
       `No Next.js attack surface found in ${options.path}.\n\n` +
-        'It looked for route handlers and Server Actions under app/, pages under\n' +
-        'app/ or pages/, and a middleware file at the root.\n\n' +
+        'It looked for route handlers and Server Actions under app/, API handlers\n' +
+        'under pages/api/, pages under app/ or pages/, and a middleware file at\n' +
+        'the root.\n\n' +
         'If your application lives elsewhere, name it:\n' +
         '  npx vulnhunt path/to/app --dry-run\n',
     )

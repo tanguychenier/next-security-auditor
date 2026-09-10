@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { NextProjectReader } from '../../src/infrastructure/project/next-project-reader.js'
 
 const shop = fileURLToPath(new URL('../fixtures/shop', import.meta.url))
+const legacyShop = fileURLToPath(new URL('../fixtures/legacy-shop', import.meta.url))
 
 describe('mapping the attack surface of a Next.js application', () => {
   it('finds route handlers and the HTTP methods they expose', async () => {
@@ -57,5 +58,42 @@ describe('mapping the attack surface of a Next.js application', () => {
     const surface = await new NextProjectReader(fileURLToPath(new URL('.', import.meta.url))).attackSurface()
 
     expect(surface).toEqual([])
+  })
+})
+
+describe('mapping an application that still uses the pages router', () => {
+  // A PROJECT WHOSE WHOLE API LIVES IN pages/api USED TO MAP TO NOTHING, and
+  // was told no attack surface was found — while the error message claimed the
+  // tool had looked under pages/. Most applications that have one never
+  // migrated, so this was the common case reported as clean.
+
+  it('finds the api handlers and the urls that reach them', async () => {
+    const surface = await new NextProjectReader(legacyShop).attackSurface()
+    const handlers = surface.filter((entry) => entry.kind === 'route-handler')
+
+    expect(handlers.map((entry) => entry.reachableAs)).toEqual(['/api/invoices/[id]', '/api/users'])
+  })
+
+  it('lists the verbs a handler guards, and says ANY when it guards none', async () => {
+    // ONE HANDLER ANSWERS EVERY VERB HERE: the router hands it the request
+    // whatever the method is, so what it compares req.method against is the
+    // only statement it makes about which verbs it meant to serve.
+    const surface = await new NextProjectReader(legacyShop).attackSurface()
+
+    expect(surface.find((entry) => entry.file.endsWith('invoices/[id].ts'))?.methods).toEqual(['DELETE', 'GET'])
+    expect(surface.find((entry) => entry.file.endsWith('api/users.ts'))?.methods).toBeUndefined()
+  })
+
+  it('keeps a page that reads the url and drops one that does not', async () => {
+    const surface = await new NextProjectReader(legacyShop).attackSurface()
+    const pages = surface.filter((entry) => entry.kind === 'page')
+
+    expect(pages.map((entry) => entry.reachableAs)).toEqual(['/account'])
+  })
+
+  it('does not mistake the framework files for routes', async () => {
+    const surface = await new NextProjectReader(legacyShop).attackSurface()
+
+    expect(surface.some((entry) => entry.file.includes('_app'))).toBe(false)
   })
 })

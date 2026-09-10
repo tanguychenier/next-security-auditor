@@ -62,6 +62,7 @@ export class NextProjectReader implements ProjectReader {
     if (/^(src\/)?middleware\.(ts|js)$/.test(file)) {
       return { kind: 'middleware', file, matcher: matcherOf(source) }
     }
+    if (isUnderPages(file)) return this.classifyPagesRouter(file, source)
     if (!isUnderApp(file)) return undefined
 
     if (/\/route\.(ts|js|tsx|jsx)$/.test(file)) {
@@ -81,9 +82,67 @@ export class NextProjectReader implements ProjectReader {
     }
     return undefined
   }
+
+  /**
+   * The router half this tool used to walk straight past.
+   *
+   * A `pages/api` HANDLER IS AN ENDPOINT LIKE ANY OTHER, and most applications
+   * that have one have not migrated. Reading only `app/` meant a project whose
+   * whole API lives there mapped to nothing and was told no attack surface was
+   * found, which is the most expensive sentence this tool can print.
+   *
+   * One handler answers every verb, because the Pages Router hands it the
+   * request whatever the method is. The verbs it compares `req.method` against
+   * are the ones it means to serve, and the ones it does not compare are the
+   * hole worth asking about.
+   */
+  private classifyPagesRouter(file: string, source: string): SurfaceEntry | undefined {
+    if (/\/_(app|document|error|middleware)\.(tsx|jsx|ts|js)$/.test(file)) return undefined
+    if (!hasDefaultExport(source)) return undefined
+
+    if (/^(src\/)?pages\/api\//.test(file)) {
+      const methods = methodsGuardedIn(source)
+      return {
+        kind: 'route-handler',
+        file,
+        reachableAs: pagesRouteOf(file),
+        ...(methods.length === 0 ? {} : { methods }),
+      }
+    }
+
+    // SAME RULE AS A PAGE IN THE APP ROUTER: one that reads nothing from the
+    // URL takes nothing from the outside.
+    if (/\b(getServerSideProps|getStaticProps|query|params)\b/.test(source)) {
+      return { kind: 'page', file, reachableAs: pagesRouteOf(file) }
+    }
+    return undefined
+  }
 }
 
 const isUnderApp = (file: string): boolean => file.startsWith('app/') || file.startsWith('src/app/')
+
+const isUnderPages = (file: string): boolean => file.startsWith('pages/') || file.startsWith('src/pages/')
+
+/** A Pages Router route is the file itself, not the directory holding it. */
+const pagesRouteOf = (file: string): string => {
+  const named = file.replace(/^(src\/)?pages\//, '').replace(/\.(tsx|jsx|ts|js|mjs)$/, '')
+  const segments = named.split('/')
+  if (segments[segments.length - 1] === 'index') segments.pop()
+  return `/${segments.join('/')}`
+}
+
+const hasDefaultExport = (source: string): boolean =>
+  /export\s+default\s+/.test(source) || /export\s*\{[^}]*\bdefault\b[^}]*\}/.test(source)
+
+/** The verbs a handler compares `req.method` against, which are the ones it meant to serve. */
+const methodsGuardedIn = (source: string): string[] => {
+  const seen = new Set<string>()
+  for (const match of source.matchAll(/\bmethod\s*[=!]==?\s*['"`]([A-Za-z]+)['"`]/g)) {
+    const verb = match[1]?.toUpperCase()
+    if (verb !== undefined && (HTTP_METHODS as readonly string[]).includes(verb)) seen.add(verb)
+  }
+  return [...seen].sort()
+}
 
 const exportsName = (source: string, name: string): boolean =>
   new RegExp(`export\\s+(?:async\\s+)?(?:function|const|let)\\s+${name}\\b`).test(source) ||
