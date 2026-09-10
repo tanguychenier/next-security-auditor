@@ -45,6 +45,27 @@ describe('what the hunt is willing to send', () => {
     }
   })
 
+  it('refuses a read that the server would route as a write', () => {
+    // THE VERB ON THE FIRST LINE IS NOT ALWAYS THE ONE THAT RUNS. A framework
+    // honouring the override header does a DELETE on what reads as a GET.
+    const overridden = { ...plan('GET', '/api/invoices/1'), headers: { 'X-HTTP-Method-Override': 'DELETE' } }
+
+    const refused = safeToSend(overridden)
+
+    expect(refused.allowed).toBe(false)
+    expect(refused.why).toContain('route a DELETE')
+  })
+
+  it('sees the override however it is spelled, header or parameter', () => {
+    expect(safeToSend({ ...plan('GET', '/api/x'), headers: { 'x-method-override': 'PUT' } }).allowed).toBe(false)
+    expect(safeToSend({ ...plan('GET', '/api/x'), headers: { 'X-HTTP-Method': 'PATCH' } }).allowed).toBe(false)
+    expect(safeToSend(plan('GET', '/api/x?_method=DELETE')).allowed).toBe(false)
+  })
+
+  it('leaves an override that asks for a read alone', () => {
+    expect(safeToSend({ ...plan('GET', '/api/x'), headers: { 'X-HTTP-Method-Override': 'HEAD' } }).allowed).toBe(true)
+  })
+
   it('allows everything once somebody asks out loud', () => {
     expect(safeToSend(plan('DELETE', '/api/admin/purge'), { destructive: true }).allowed).toBe(true)
   })

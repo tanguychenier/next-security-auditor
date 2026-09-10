@@ -14,9 +14,29 @@ const DESTROYS = [
   'reset', 'clear', 'erase', 'remove-all', 'prune', 'revoke',
 ]
 
+/**
+ * Headers and parameters a framework honours as "treat this as another method".
+ *
+ * A GET CARRYING ONE OF THESE IS NOT A READ. The line at the top of the request
+ * says GET and the router does a DELETE, which is exactly the shape of request
+ * this policy exists to stop.
+ */
+const OVERRIDE_HEADERS = ['x-http-method-override', 'x-method-override', 'x-http-method']
+const OVERRIDE_PARAMETER = /[?&]_method=([a-z]+)/i
+
 export interface Verdict {
   readonly allowed: boolean
   readonly why: string
+}
+
+/** The method the server will actually route, once overrides are honoured. */
+const effectiveMethod = (plan: ProofPlan): string => {
+  for (const [name, value] of Object.entries(plan.headers ?? {})) {
+    if (OVERRIDE_HEADERS.includes(name.toLowerCase())) return value.toUpperCase()
+  }
+  const parameter = OVERRIDE_PARAMETER.exec(plan.path)
+  if (parameter?.[1] !== undefined) return parameter[1].toUpperCase()
+  return plan.method.toUpperCase()
 }
 
 /**
@@ -35,8 +55,13 @@ export const safeToSend = (plan: ProofPlan, allow: { destructive?: boolean } = {
 
   const advice = 'Point the hunt at a disposable server and pass --allow-destructive to send it.'
 
-  if (!READS.includes(plan.method.toUpperCase())) {
-    return { allowed: false, why: `the proof was not sent: ${plan.method} changes state by definition. ${advice}` }
+  const method = effectiveMethod(plan)
+  if (!READS.includes(method)) {
+    const disguised =
+      method === plan.method.toUpperCase()
+        ? `${plan.method} changes state by definition`
+        : `it says ${plan.method.toUpperCase()} and the server would route a ${method}`
+    return { allowed: false, why: `the proof was not sent: ${disguised}. ${advice}` }
   }
 
   const path = plan.path.toLowerCase()
