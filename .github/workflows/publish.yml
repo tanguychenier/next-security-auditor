@@ -1,0 +1,48 @@
+name: Publish
+
+# A TAG IS THE RELEASE, so pushing one is the whole ceremony. Nothing publishes
+# from a laptop any more, which is what kept the published versions without
+# provenance and tied a release to whichever machine was signed in that day.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Trusted publishing: npm trusts this workflow, so there is no token to
+      # store in the repository and none to rotate when somebody leaves.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+      - run: npm ci
+
+      # THE SAME GATE AS EVERY PUSH, run again here on purpose. A release is the
+      # one build nobody re-runs, so it is the one that must not be taken on
+      # trust from a green tick somewhere else.
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # A TAG THAT DISAGREES WITH THE MANIFEST PUBLISHES THE WRONG VERSION, and
+      # the mistake is only visible once it is on the registry and immutable.
+      - name: the tag and the manifest must agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag v$tag does not match package.json $manifest"
+            exit 1
+          fi
+
+      # Trusted publishing needs a recent npm; the one bundled with Node is not
+      # always it.
+      - run: npm install -g npm@latest
+      - run: npm publish
