@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
+import type { ModelGateway } from '../application/ports/model-gateway.js'
 import { NextProjectReader } from '../infrastructure/project/next-project-reader.js'
 import { ModelVulnerabilityFinder } from '../infrastructure/llm/model-vulnerability-finder.js'
 import { AnthropicApiGateway } from '../infrastructure/model/anthropic-api-gateway.js'
@@ -188,6 +189,46 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
 }
 
 /**
+ * Which model answers, from what the operator already has.
+ *
+ * THE KEY SAYS WHICH VENDOR IT BELONGS TO, so nobody has to name it twice and
+ * get it wrong once. `--local` wins over all of it: a key left in an
+ * environment must not quietly send the code away when somebody asked for a
+ * model on their own machine.
+ */
+export const gatewayFor = (apiKey: string, local: boolean, named?: string): ModelGateway => {
+  const model = named === undefined ? {} : { model: named }
+  if (local) return new OllamaGateway(model)
+  if (apiKey === '') return new ClaudeSubscriptionGateway(model)
+  if (apiKey.startsWith('sk-ant-')) return new AnthropicApiGateway({ apiKey, ...model })
+  if (apiKey.startsWith('sk-')) return new OpenAiGateway({ apiKey, ...model })
+  return new AnthropicApiGateway({ apiKey, ...model })
+}
+
+/**
+ * Where a run writes, and where it reads its environment.
+ *
+ * A COMMAND THAT ONLY EXISTS AS A PROCESS CAN ONLY BE TESTED AS A PROCESS. The
+ * suite spawned the built binary for every case it wanted to cover, which is
+ * honest and slow, and left the error branches untested because each one cost a
+ * process. They are arguments now: the executable at the bottom of this file
+ * passes the real ones, a test passes its own.
+ */
+export interface Output {
+  readonly out: (text: string) => void
+  readonly err: (text: string) => void
+}
+
+/* v8 ignore start -- the real streams and the executable entry below are
+   driven by tests/integration/command-line-end-to-end.test.ts, which spawns the
+   built binary: a process is the only thing that can reach them. */
+const processOutput: Output = {
+  out: (text) => void process.stdout.write(text),
+  err: (text) => void process.stderr.write(text),
+}
+/* v8 ignore stop */
+
+/**
  * What a reader needs from the comparison, and nothing else.
  *
  * A FIXED FLAW IS THE ONLY GOOD NEWS THIS TOOL EVER DELIVERS, so it is said out
@@ -200,10 +241,10 @@ const whatChanged = (compared: Comparison): string[] => [
 ]
 
 /** Replays what was accepted, without asking any model. */
-const replayBaseline = async (options: Options): Promise<number> => {
+const replayBaseline = async (options: Options, output: Output): Promise<number> => {
   const accepted = readBaseline(options.path, options.baseline)
   if (accepted.length === 0) {
-    process.stderr.write(
+    output.err(
       'Nothing has been accepted yet, so there is nothing to replay.\n' +
         'Run a hunt first, then --accept what you decide to keep.\n',
     )
@@ -212,11 +253,11 @@ const replayBaseline = async (options: Options): Promise<number> => {
 
   const result = await replay(new HttpProofRunner(options.target), accepted)
 
-  for (const entry of result.closed) process.stdout.write(`  closed       ${entry.id}  ${entry.title}\n`)
-  for (const entry of result.stillOpen) process.stdout.write(`  still open   ${entry.id}  ${entry.title}\n`)
-  for (const entry of result.unknown) process.stdout.write(`  no answer    ${entry.id}  ${entry.title}\n`)
+  for (const entry of result.closed) output.out(`  closed       ${entry.id}  ${entry.title}\n`)
+  for (const entry of result.stillOpen) output.out(`  still open   ${entry.id}  ${entry.title}\n`)
+  for (const entry of result.unknown) output.out(`  no answer    ${entry.id}  ${entry.title}\n`)
 
-  process.stdout.write(
+  output.out(
     `\n${result.closed.length} closed, ${result.stillOpen.length} still open, ` +
       `${result.unknown.length} could not be replayed.\n`,
   )
@@ -224,21 +265,25 @@ const replayBaseline = async (options: Options): Promise<number> => {
   return stillFailing(result) ? 1 : 0
 }
 
-const main = async (): Promise<number> => {
-  const options = parse(process.argv.slice(2))
+export const run = async (
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+  output: Output = processOutput,
+): Promise<number> => {
+  const options = parse(argv)
   if (options !== 'help' && options !== 'version' && options.recheck) {
     // DID THE FIX WORK? The requests are already written down, so answering
     // costs nothing: no model, no bill, and the same verdict twice.
-    return replayBaseline(options)
+    return replayBaseline(options, output)
   }
 
   if (options === 'version') {
-    process.stdout.write(`${VERSION}\n`)
+    output.out(`${VERSION}\n`)
     return 0
   }
 
   if (options === 'help') {
-    process.stdout.write(`${USAGE}\n`)
+    output.out(`${USAGE}\n`)
     return 0
   }
 
@@ -246,7 +291,7 @@ const main = async (): Promise<number> => {
   // nothing for a directory it cannot open, and "no attack surface found" then
   // reads as a verdict on the code instead of a verdict on the path.
   if (!statSafely(options.path)) {
-    process.stderr.write(`${options.path} is not a directory this hunt can read.\n`)
+    output.err(`${options.path} is not a directory this hunt can read.\n`)
     return 2
   }
 
@@ -261,12 +306,12 @@ const main = async (): Promise<number> => {
     try {
       changed = await changedSince(options.path, options.since)
     } catch (failure) {
-      process.stderr.write(`${(failure as Error).message}\n`)
+      output.err(`${(failure as Error).message}\n`)
       return 2
     }
     const whole = surface.length
     surface = changedSurface(surface, changed)
-    process.stdout.write(
+    output.out(
       `Scoped to ${surface.length} of ${whole} entries, from ${changed.length} files ` +
         `changed since ${options.since}.\n`,
     )
@@ -276,7 +321,7 @@ const main = async (): Promise<number> => {
     // AND THIS IS THE FIRST THING MOST PEOPLE SEE, because the first command
     // anybody types is the wrong one. It says what was looked for and what to
     // try next, rather than only what failed.
-    process.stderr.write(
+    output.err(
       `No Next.js attack surface found in ${options.path}.\n\n` +
         'It looked for route handlers and Server Actions under app/, API handlers\n' +
         'under pages/api/, pages under app/ or pages/, and a middleware file at\n' +
@@ -293,7 +338,7 @@ const main = async (): Promise<number> => {
     )
     const hunted = selectedRules(await readConfigFile(options.path))
     const estimate = estimateAudit(sources, PRICING, hunted.length)
-    process.stdout.write(
+    output.out(
       [
         `${surface.length} attack-surface entries found.`,
         `${hunted.length} rules selected.`,
@@ -328,7 +373,7 @@ const main = async (): Promise<number> => {
   // throwaway server is refused before anything is sent, because a copied
   // command or a leftover variable should not attack a live site.
   if (!options.allowRemoteTarget && !disposableTarget(options.target)) {
-    process.stderr.write(
+    output.err(
       `${options.target} does not look like a local, disposable server.\n` +
         'The hunt sends requests designed to succeed. Point it at a development\n' +
         'server with data you can lose, or pass --allow-remote-target to insist.\n',
@@ -336,24 +381,13 @@ const main = async (): Promise<number> => {
     return 2
   }
 
-  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? ''
+  const apiKey = env['ANTHROPIC_API_KEY'] ?? ''
   const selection = await readConfigFile(options.path)
   // NOTHING LEAVES THE MACHINE with --local, and that is a promise a socket
   // keeps rather than a policy somebody has to read and trust. It wins over a
   // key left in the environment: a forgotten variable must not quietly send the
   // code away when somebody asked for local.
-  const model = options.model === undefined ? {} : { model: options.model }
-  // THE KEY SAYS WHICH VENDOR IT BELONGS TO, so nobody has to name it twice and
-  // get it wrong once.
-  const chosen = options.local
-    ? new OllamaGateway(model)
-    : apiKey === ''
-      ? new ClaudeSubscriptionGateway(model)
-      : apiKey.startsWith('sk-ant-')
-        ? new AnthropicApiGateway({ apiKey, ...model })
-        : apiKey.startsWith('sk-')
-          ? new OpenAiGateway({ apiKey, ...model })
-          : new AnthropicApiGateway({ apiKey, ...model })
+  const chosen = gatewayFor(apiKey, options.local, options.model)
 
   // ASKING AGAIN ABOUT UNCHANGED CODE IS PAYING TWICE, in euros on a key and in
   // seconds on a subscription. Seconds are what decide whether a check runs on
@@ -394,7 +428,7 @@ const main = async (): Promise<number> => {
 
   if (options.accept) {
     const path = writeBaseline(options.path, options.baseline, identified)
-    process.stdout.write(`${identified.length} findings accepted in ${path}.\n`)
+    output.out(`${identified.length} findings accepted in ${path}.\n`)
   }
 
   // THE ONE THING THAT OUTLIVES THIS TOOL: a test in their repository runs on
@@ -402,15 +436,25 @@ const main = async (): Promise<number> => {
   if (options.emitTests !== undefined) {
     if (ensureDirectory(options.emitTests)) {
       let written = 0
-      for (const entry of identified) {
-        const source = regressionTestFor(entry, options.target)
-        if (source === undefined) continue
-        writeFileSync(join(options.emitTests, testFileNameFor(entry)), source, 'utf8')
-        written += 1
+      // THE REPORT IS NOT WORTH LESS THAN THE TESTS. Writing them is the last
+      // step of a run that already cost a model and a series of requests, so a
+      // disk that refuses one file says so and the findings still come out.
+      try {
+        for (const entry of identified) {
+          const source = regressionTestFor(entry, options.target)
+          if (source === undefined) continue
+          writeFileSync(join(options.emitTests, testFileNameFor(entry)), source, 'utf8')
+          written += 1
+        }
+        output.out(`\n${written} regression tests written to ${options.emitTests}. Commit them.\n`)
+      } catch (failure) {
+        output.out(
+          `\n${written} regression tests written to ${options.emitTests}, ` +
+            `then it stopped: ${(failure as Error).message}\n`,
+        )
       }
-      process.stdout.write(`\n${written} regression tests written to ${options.emitTests}. Commit them.\n`)
     } else {
-      process.stdout.write(`\n${options.emitTests} could not be created, so no test was written.\n`)
+      output.out(`\n${options.emitTests} could not be created, so no test was written.\n`)
     }
   }
 
@@ -420,7 +464,7 @@ const main = async (): Promise<number> => {
   try {
     threshold = options.failOn === undefined ? anySeverity() : thresholdNamed(options.failOn)
   } catch (refused) {
-    process.stderr.write(`${(refused as Error).message}\n`)
+    output.err(`${(refused as Error).message}\n`)
     return 2
   }
 
@@ -471,9 +515,9 @@ const main = async (): Promise<number> => {
         )}\n`
 
   if (options.out) await writeFile(options.out, rendered, 'utf8')
-  else process.stdout.write(rendered)
+  else output.out(rendered)
 
-  for (const line of whatChanged(compared)) process.stdout.write(`${line}\n`)
+  for (const line of whatChanged(compared)) output.out(`${line}\n`)
 
   // A PROVEN FINDING FAILS THE BUILD. A suspicion never does : that is the
   // difference this tool exists to make, and the exit code has to carry it.
@@ -508,7 +552,7 @@ const wasRunDirectly = (): boolean => {
 }
 
 if (wasRunDirectly()) {
-  main()
+  run(process.argv.slice(2), process.env, processOutput)
     .then((code) => {
       process.exitCode = code
     })
