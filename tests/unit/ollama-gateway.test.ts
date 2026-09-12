@@ -35,6 +35,28 @@ describe('keeping the local hunt local', () => {
     expect(() => new OllamaGateway({ baseUrl: 'http://192.168.1.40:11434' })).not.toThrow()
     expect(() => new OllamaGateway({ baseUrl: 'http://gpu-box:11434' })).not.toThrow()
   })
+
+  it('reads the address Ollama itself documents, written without a scheme', () => {
+    // `new URL('localhost:11434')` TAKES "localhost" FOR THE PROTOCOL and
+    // leaves no host at all, so the most local address there is was refused as
+    // if it were somewhere on the internet — and that form is the one Ollama
+    // documents and the one people already have in their environment.
+    expect(() => new OllamaGateway({ baseUrl: 'localhost:11434' })).not.toThrow()
+    expect(() => new OllamaGateway({ baseUrl: '192.168.1.40:11434' })).not.toThrow()
+    expect(() => new OllamaGateway({ baseUrl: 'ollama.example.com:11434' })).toThrow(/refuses to send the source/)
+  })
+
+  it('sends to the address it was given, once it is a URL', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (url: string) => {
+      seen.push(url)
+      return { ok: true, status: 200, json: async () => ({ message: { content: '[]' } }), text: async () => '' }
+    }) as unknown as typeof fetch
+
+    await new OllamaGateway({ baseUrl: 'localhost:11434', fetchImpl }).ask('s', 'u', 100)
+
+    expect(seen[0]).toBe('http://localhost:11434/api/chat')
+  })
 })
 
 describe('asking a model on this machine', () => {

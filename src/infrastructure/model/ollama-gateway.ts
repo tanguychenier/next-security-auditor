@@ -29,14 +29,19 @@ export class OllamaGateway implements ModelGateway {
     this.model = options.model ?? DEFAULT_MODEL
     // OLLAMA_HOST IS THE VARIABLE OLLAMA ITSELF READS. A team running the model
     // on the one machine with a GPU should not have to fork the tool to reach it.
-    this.baseUrl = options.baseUrl ?? process.env['OLLAMA_HOST'] ?? 'http://localhost:11434'
+    const asked = options.baseUrl ?? process.env['OLLAMA_HOST'] ?? 'http://localhost:11434'
+    // OLLAMA DOCUMENTS ITS OWN VARIABLE WITHOUT A SCHEME, as `localhost:11434`.
+    // Read as written, that is not a URL at all: `new URL` takes "localhost" for
+    // the protocol and leaves no host, so the most local address there is came
+    // out looking like somewhere else entirely.
+    this.baseUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(asked) ? asked : `http://${asked}`
     // "NOTHING LEAVES THE MACHINE" IS A PROMISE A SOCKET KEEPS, and this is the
     // socket. A variable left in the environment must not turn the local mode
     // into shipping somebody's employer's code to a public host. The GPU box on
     // the office network still passes: it is the internet that does not.
     if (!disposableTarget(this.baseUrl)) {
       throw new Error(
-        `the local hunt refuses to send the source to ${this.baseUrl}: ` +
+        `the local hunt refuses to send the source to ${asked}: ` +
           'it is not this machine nor a private network. Unset OLLAMA_HOST, or point it at one.',
       )
     }
