@@ -276,9 +276,12 @@ behind a reassuring report.
 
 - **It does not replace dependency scanning.** Dependabot and Snyk read your
   lockfile, this reads your code. They pair well.
-- **It does not find every flaw.** It finds what one HTTP request against a
-  running application can demonstrate. A race condition spread over three
-  requests is out of reach, and the tool says so rather than guessing.
+- **It does not find every flaw.** It finds what a request against a running
+  application can demonstrate — one request, or the same one repeated when one
+  shows nothing. A race needing two requests in the same instant, and a flaw
+  needing a stateful path walked in order, stay out of reach: those rules are
+  left out of the default set rather than reported on a proof that could not
+  fail.
 - **It does not hunt a production deployment.** Point it at a development server
   with disposable data. It sends requests designed to succeed.
 
