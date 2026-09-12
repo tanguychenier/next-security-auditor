@@ -168,6 +168,11 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
   )
   const out = value('--out')
   const model = value('--model')
+  // A LEVEL NOBODY CHOSE IS REFUSED HERE, not after the hunt. Read at the end, a
+  // typo cost a whole run first — a model answered and requests went out at
+  // somebody's application — before the tool said the word was not a severity.
+  const failOn = value('--fail-on')
+  if (failOn !== undefined) thresholdNamed(failOn)
   return {
     path: positional ?? process.cwd(),
     target: value('--target') ?? 'http://localhost:3000',
@@ -182,7 +187,7 @@ export const parse = (argv: readonly string[]): Options | 'help' | 'version' => 
     ...(value('--baseline') === undefined ? {} : { baseline: value('--baseline') as string }),
     ...(value('--emit-tests') === undefined ? {} : { emitTests: value('--emit-tests') as string }),
     ...(value('--since') === undefined ? {} : { since: value('--since') as string }),
-    ...(value('--fail-on') === undefined ? {} : { failOn: value('--fail-on') as string }),
+    ...(failOn === undefined ? {} : { failOn }),
     ...(out === undefined ? {} : { out }),
     ...(model === undefined ? {} : { model }),
   }
@@ -270,7 +275,15 @@ export const run = async (
   env: NodeJS.ProcessEnv = process.env,
   output: Output = processOutput,
 ): Promise<number> => {
-  const options = parse(argv)
+  let options
+  try {
+    options = parse(argv)
+  } catch (refused) {
+    // THE COMMAND LINE IS THE FIRST THING ANYBODY GETS WRONG, so being told
+    // what is wrong with it is the first thing the tool owes them.
+    output.err(`${(refused as Error).message}\n`)
+    return 2
+  }
   if (options !== 'help' && options !== 'version' && options.recheck) {
     // DID THE FIX WORK? The requests are already written down, so answering
     // costs nothing: no model, no bill, and the same verdict twice.

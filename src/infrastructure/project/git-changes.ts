@@ -9,7 +9,7 @@ export interface CommandResult {
 
 export type GitRunner = (argv: readonly string[]) => Promise<CommandResult>
 
-const runGit: GitRunner = async (argv) =>
+export const runGit: GitRunner = async (argv) =>
   new Promise((resolve) => {
     execFile('git', [...argv], { timeout: 30_000 }, (error, stdout, stderr) =>
       resolve({

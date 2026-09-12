@@ -23,7 +23,7 @@ export interface SubscriptionOptions {
 const DEFAULT_MODEL = 'sonnet'
 
 /** Arguments are passed as a list, so nothing ever goes through a shell. */
-const spawnRunner =
+export const spawnRunner =
   (timeoutMs: number): CommandRunner =>
   (command, input) =>
     new Promise((resolve, reject) => {

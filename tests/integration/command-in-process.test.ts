@@ -144,11 +144,36 @@ describe('what the command answers without hunting anything', () => {
     expect(recording.stderr()).toContain('does not look like a local, disposable server')
   })
 
-  it('refuses a threshold nobody chose rather than gating on a guess', async () => {
+  it('refuses a threshold nobody chose before paying for a hunt', async () => {
+    // READ AT THE END, a typo cost a whole run first: a model answered and
+    // requests went out at somebody's application, and only then did the tool
+    // say the word was not a severity.
+    let asked = 0
+    const counted = createServer((_request, response) => {
+      asked += 1
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ message: { content: '[]' }, done: true }))
+    })
+    const countedPort = await listen(counted)
+    vi.stubEnv('OLLAMA_HOST', `http://127.0.0.1:${countedPort}`)
     const recording = recorder()
 
-    expect(await run([shop, '--fail-on', 'catastrophic'], {}, recording.output)).toBe(2)
-    expect(recording.stderr()).toMatch(/critical|high|medium|low/)
+    try {
+      const code = await run([shop, '--local', '--fail-on', 'catastrophic'], {}, recording.output)
+
+      expect(code).toBe(2)
+      expect(recording.stderr()).toMatch(/critical|high|medium|low/)
+      expect(asked).toBe(0)
+    } finally {
+      counted.close()
+    }
+  })
+
+  it('says which flag was given no value, instead of taking the next one', async () => {
+    const recording = recorder()
+
+    expect(await run([shop, '--target', '--dry-run'], {}, recording.output)).toBe(2)
+    expect(recording.stderr()).toContain('--target')
   })
 
   it('says what it would cost, and sends nothing, on a dry run', async () => {

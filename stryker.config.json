@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "MUTATION TESTING ASKS WHETHER THE TESTS WOULD NOTICE. A suite that passes against broken code will pass against a real regression too, and this repository has had two of those: a baseline gate that was computed and ignored, and a count from a model that killed the run. Both passed every test that existed.",
+  "packageManager": "npm",
+  "testRunner": "vitest",
+  "reporters": [
+    "progress",
+    "clear-text",
+    "html"
+  ],
+  "mutate": [
+    "src/**/*.ts",
+    "!src/cli/main.ts"
+  ],
+  "_comment_mutate": "main.ts is the wiring, and its own e2e drives it through a real process: mutating it times out the runner rather than telling us anything. Its branches are covered by tests/integration, and the rest of src is where a wrong answer would be silent.",
+  "thresholds": {
+    "high": 85,
+    "low": 70,
+    "break": 65
+  },
+  "timeoutMS": 20000,
+  "concurrency": 4,
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts"
+  }
+}
