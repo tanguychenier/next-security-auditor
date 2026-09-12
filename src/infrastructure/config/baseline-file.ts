@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readAccepted, writeAccepted, type AcceptedProof } from '../../domain/policies/accepted-findings.js'
 
@@ -36,7 +36,10 @@ export const writeBaseline = (
 export const ensureDirectory = (path: string): boolean => {
   try {
     if (!existsSync(path)) mkdirSync(path, { recursive: true })
-    return true
+    // EXISTING IS NOT THE SAME AS BEING A DIRECTORY. A path that was already a
+    // file passed this guard, and the first test written into it died on
+    // ENOTDIR — after the hunt had finished, so the report went with it.
+    return statSync(path).isDirectory()
   } catch {
     return false
   }
