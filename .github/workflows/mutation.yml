@@ -1,0 +1,37 @@
+name: Mutation
+
+# NIGHTLY, NOT ON EVERY PUSH. Stryker writes each mutant into a sandbox and runs
+# the suite again: measured at about twenty seconds a mutant on this project,
+# a full pass over the domain is an hour of machine time. That is worth paying
+# once a night, and it is not worth making somebody wait for it on a pull
+# request — the tests, the types and the build already run there.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # THE QUESTION IS WHETHER THE TESTS WOULD NOTICE. A suite that passes
+      # against broken code will pass against a real regression too, and this
+      # repository has had two: a baseline gate computed and then ignored, and a
+      # count from a model that killed the run. Both passed every test that
+      # existed at the time.
+      - run: npx stryker run --concurrency 2
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          retention-days: 14

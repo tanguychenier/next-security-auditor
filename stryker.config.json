@@ -2,25 +2,31 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "_comment": "MUTATION TESTING ASKS WHETHER THE TESTS WOULD NOTICE. A suite that passes against broken code will pass against a real regression too, and this repository has had two of those: a baseline gate that was computed and ignored, and a count from a model that killed the run. Both passed every test that existed.",
   "packageManager": "npm",
-  "testRunner": "vitest",
+  "testRunner": "command",
   "reporters": [
     "progress",
     "clear-text",
     "html"
   ],
   "mutate": [
-    "src/**/*.ts",
-    "!src/cli/main.ts"
+    "src/domain/**/*.ts"
   ],
-  "_comment_mutate": "main.ts is the wiring, and its own e2e drives it through a real process: mutating it times out the runner rather than telling us anything. Its branches are covered by tests/integration, and the rest of src is where a wrong answer would be silent.",
+  "_comment_mutate": "Where a wrong answer is silent. The domain decides what counts as a proof, what identifies a finding and what stops a build, so a mutation there produces a report that reads exactly like a correct one. Measured cost with the command runner: about twenty seconds a mutant, which is why this runs nightly rather than on a push.",
   "thresholds": {
-    "high": 85,
-    "low": 70,
-    "break": 65
+    "high": 90,
+    "low": 80,
+    "break": 75
   },
   "timeoutMS": 20000,
   "concurrency": 4,
-  "vitest": {
-    "configFile": "vitest.mutation.config.ts"
+  "ignorePatterns": [
+    "dist",
+    "coverage",
+    "reports",
+    ".stryker-tmp"
+  ],
+  "_comment_ignore": "The sandbox is a copy of the project, and a copied transform cache is the unmutated source: vitest served it and every mutant survived. dist is not needed either, since the test that drives the built binary is the one test left out of this run.",
+  "commandRunner": {
+    "command": "npx vitest run --config vitest.mutation.config.ts tests/unit"
   }
 }
