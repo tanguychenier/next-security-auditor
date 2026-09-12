@@ -6,14 +6,18 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  # A RELEASE THAT FAILED FOR A REASON OUTSIDE THE CODE has to be re-runnable
+  # without moving the tag.
+  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Trusted publishing: npm trusts this workflow, so there is no token to
-      # store in the repository and none to rotate when somebody leaves.
+      # THE PACKAGE STILL CARRIES ITS PROVENANCE. npm signs it from this
+      # workflow's identity, so a reader can check where a version was built
+      # even though the registry is reached with a token.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +46,24 @@ jobs:
             exit 1
           fi
 
-      # Trusted publishing needs a recent npm; the one bundled with Node is not
-      # always it.
+      # PUBLISHING TWICE IS NOT AN ERROR WORTH FAILING A BUILD FOR. A re-run of
+      # a release that already happened should say so and stop, not paint the
+      # pipeline red over work that is done.
+      - name: already on the registry?
+        id: state
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "vulnerability-hunter-next@${version}" version > /dev/null 2>&1; then
+            echo "published=yes" >> "$GITHUB_OUTPUT"
+            echo "${version} is already on the registry: nothing to do."
+          else
+            echo "published=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Provenance needs a recent npm; the one bundled with Node is not always it.
       - run: npm install -g npm@latest
-      - run: npm publish
+        if: steps.state.outputs.published == 'no'
+      - run: npm publish --provenance
+        if: steps.state.outputs.published == 'no'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
