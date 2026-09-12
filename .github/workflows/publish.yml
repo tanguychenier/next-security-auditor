@@ -38,6 +38,9 @@ jobs:
       # A TAG THAT DISAGREES WITH THE MANIFEST PUBLISHES THE WRONG VERSION, and
       # the mistake is only visible once it is on the registry and immutable.
       - name: the tag and the manifest must agree
+        # ONLY A TAG CARRIES A VERSION TO AGREE WITH. A run started by hand is
+        # re-running a release, and its ref is the branch.
+        if: github.ref_type == 'tag'
         run: |
           tag="${GITHUB_REF_NAME#v}"
           manifest="$(node -p "require('./package.json').version")"
